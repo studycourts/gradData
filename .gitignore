@@ -1,0 +1,16 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+/.quarto/
+
+**/*_cache/
+**/cache/
+
+.DS_Store
+
+euro.csv
+euro.rds
+euro_labels.csv
+**/*.quarto_ipynb

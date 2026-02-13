@@ -1,0 +1,743 @@
+---
+title: "Multicollinearity"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
+output:
+  bookdown::html_document2:
+    number_sections: FALSE
+    toc: false
+    code_folding: hide
+    self_contained: true
+    base_format: rmarkdown::html_document
+bibliography: hw.bib
+csl: gill_apsr.csl
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{css, echo = FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+/* This code defines the highlighted "mark" tag */
+
+mark {
+  background-color: LemonChiffon;
+  color: black;
+}
+
+/* This code makes the tables a little nicer. */
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width:80%;
+  white-space:nowrap;
+}
+
+```
+
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      cache = FALSE)
+
+```
+
+```{r}
+#| label: libs
+
+library(knitr)        # for kable tables, etc.
+library(texreg)       # pretty model tables
+library(car)          # helpful summary functions
+library(carData)      # data to use with car functions
+library(ggcorrplot)   # pretty correlation matrices
+library(stargazer)    # pretty tables 
+library(kableExtra)   # makes kable tables prettier
+library(ggeffects)    # to plot predictions from models
+library(modelsummary) # pretty tables supporting stan_glm
+library(ggeffects)    # for plotting model effects
+library(ggiraphExtra) # more model effect plot functions
+library(arm)          # tools to plot 
+library(Hmisc)        # simple correlation matrix with significance
+library(psych)        # factor analysis tools
+library(plotly)       # for cool interactive 3D plots 
+library(eulerr)       # for Venn diagrams
+library(gridExtra)    # for arranging multiple plots in a grid
+library(broom)
+library(tidyverse)    # load last to avoid conflicts with other packages
+
+options(scipen = 999) # prevents scientific notation in the output
+
+```
+
+## Introduction
+
+In this document, we're going to talk about multicollinearity and its effects on our regression models. Multicollinearity is a situation in which two or more predictor variables in a regression model are highly correlated with each other. This can cause problems for our regression models because it can make it difficult to determine the individual effect of each predictor variable on the dependent variable. To deal with this issue, we need to identify it and then take steps to address it.
+
+First, I'll walk you through what multicollinearity is. Then, I'll show you an example of how to diagnose the problem and some ways to address it. Among the possible solutions is to use principal components factor analysis (often abbreviated as PCF) to (1) reduce the dimensionality of a battery of questions to help deal with problematic multicollinearity, and (2) incorporate multiple measures of a single underlying concept without risking high multicollinearity (or to use as a more precise measure of a dependent variable). We'll learn how to implement that in R.
+
+## Multicollinearity and its Types
+
+Multicollinearity can be categorized into two types: perfect multicollinearity and imperfect multicollinearity. Perfect multicollinearity occurs when one predictor variable is a perfect linear combination of one or more other predictor variables. This means that the predictor variables are perfectly correlated with each other, and it can lead to issues in estimating the regression coefficients. Imperfect multicollinearity, on the other hand, occurs when predictor variables are highly correlated but not perfectly so. This can also lead to issues in estimating the regression coefficients, but it may not be as severe as perfect multicollinearity.
+
+**Perfect multicollinearity** occurs when one predictor variable is a perfect linear combination of one or more other predictor variables. This means that the predictor variables are perfectly correlated with each other, and it can lead to issues in estimating the regression coefficients. One of our regression assumptions is that there is *no perfect multicollinearity*. If there is, the regression model cannot be estimated because the predictor variables are perfectly correlated, and it can lead to issues in interpreting the results.
+
+The figure below shows what this looks like in the context of a regression with two perfectly collinear predictor variables. Go ahead and play with it to get a better sense of what this looks like in 3D space. You can rotate it around and zoom in and out to see how the points are distributed.
+
+```{r}
+#| label: perfect
+
+
+# graphic representation of perfect multicollinearity 
+
+# fake some data
+set.seed(42)
+x1 <- seq(1, 10, length.out = 50)
+x2 <- x1 * 1.5 # Perfect collinearity
+y <- 2*x1 + rnorm(50, sd = 2)
+df <- data.frame(x1, x2, y)
+
+# make a cool plot
+plot_ly(df, x = ~x1, y = ~x2, z = ~y) %>%
+  add_markers(marker = list(size = 5, color = 'blue', opacity = 0.6)) %>%
+  layout(
+    title = "Perfect Multicollinearity in 3D Space",
+    scene = list(
+      xaxis = list(title = "X1"),
+      yaxis = list(title = "X2 (= 2 * X1)"),
+      zaxis = list(title = "Y")
+    )
+  )
+
+```
+
+::: question
+Cool. But why is this a problem?
+:::
+
+Let's consider the regression model: $$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + e$$.
+
+If $x_2$ is a perfect linear combination of $x_1$ (i.e., $x_2 = 2 * x_1$), then we can rewrite the model as:
+
+$$
+\begin{align}
+y &= \beta_0 + \beta_1 x_1 + \beta_2 (2 * x_1) + e \\
+  &= \beta_0 + (\beta_1 + 2\beta_2) x_1 + e
+\end{align}
+$$
+
+This means that we end up with two coefficients, $\beta_1$ and $2 \times \beta_2$ multiplied by just one of our explanatory variables. This is because we've substituted a linear transformation of $x_1$ for the values in $x_2$. This, in turn, causes $x_2$ to drop out of our equation. In this case, we cannot estimate $\beta_1$ and $\beta_2$ separately because the underlying measures are perfectly correlated (ie. $\rho_{(x_1,x_2)} = 1.0$). The regression model will fail to estimate the coefficients, and we won't be able to determine the individual effect of each predictor variable on the dependent variable. In other words, $x_2$ adds *no additional information* to our model above what $x_1$ already provides.
+
+Even if we could find an estimate for $\beta_1$ and $\beta_2$, the standard errors also pose a problem. Recall that the variance for $\hat{\beta}_1$ in a regression with two predictor variables is:
+
+$$
+\textrm{Var}(\hat{\beta}_1) = \frac{\sigma^2}{\sum (x_i - \bar{x})^2 (1 - R^2_{x_1|x_2})}
+$$
+
+::: question
+What is $R^2_{x_1|x_2}$ in this equation?
+:::
+
+In this equation, $R^2_{x_1|x_2}$ represents the coefficient of determination from a regression of $x_1$ on $x_2$. It measures the proportion of the variance in $x_1$ that can be explained by $x_2$. If our two variables are perfectly correlated, then $R^2_{x_1|x_2} = 1$. In this situation, the denominator of the variance formula becomes zero. Hopefully we remember enough from college algebra to know that we can't have a zero in the denominator of our fraction. This would mean the estimate of the variance for $\hat{\beta}_1 = \infty$, which makes any hypothesis tests we'd want to conduct meaningless.
+
+::: question
+This sounds scary. Should I be worried?
+:::
+
+So, is perfect multicollinearity something to be worried about? In the real world, no. This usually only happens if we have a data error or mistakenly put two versions of the same variable into the model. Sure, doing this would collapse the model *if* R would let you do this. But it won't. Don't believe me? Let's try it.
+
+```{r}
+#| label: summary
+
+lm(y ~ x1 + x2) %>%
+  summary()
+
+
+```
+
+R assumes you didn't mean to do this, so it just gives you a row of `NA`s where the estimates for the parameters would have been.
+
+::: question
+Ok, but what if we have imperfect but *high* multicollinearity?
+:::
+
+High but imperfect multicollinearity does *not* actually violate our regression assumptions, nor does it cause R to fail to estimate the model. However, it can cause problems for our inference. When we have high multicollinearity, the standard errors of our estimates can become inflated. This can lead to a higher risk of committing Type II errors (i.e., failing to reject a false null hypothesis). In other words, we might fail to detect a significant effect of a predictor variable on the dependent variable because the standard error is too large. This is something we should be concerned about, especially if we're interested in understanding the individual effects of our predictor variables.
+
+Recall that the estimate of the partial slope coefficient $\hat{\beta}_1$ in a regression with two predictor variables is:
+
+$$
+\hat{\beta}_1 = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sum (x_i - \bar{x})^2 (1 - R^2_{x_1|x_2})}
+$$
+
+Now, imagine that the Venn diagram below shows the configuration of the overlap between $Y$, $X_1$, and $X_2$.
+
+::: question
+Which part of the diagram is used to estimate $\hat{\beta}_1$? Which part is used to estimate $\hat{\beta}_2$?
+:::
+
+```{r}
+#| label: venn
+
+# which part of the diagram is used to estimate b1? b2?
+
+# create pieces of the diagram
+set.seed(1975)
+vd <- euler(c(
+  "X1" = 10, 
+  "X2" = 10, 
+  "Y" = 10,
+  "X1&X2" = 4, 
+  "X1&Y" = 2, 
+  "X2&Y" = 2, 
+  "X1&X2&Y" = 3
+))
+
+# labelled plot
+plot(vd, 
+     labels = c("X1", "X2", "Y"),
+     quantities = list(labels = c("a", "b", "c", "d", "e", "f", "g")),
+     main = "Identify the Variance Partitions")
+
+```
+
+If you could identify that the section marked "e" is used to calculate $\hat{\beta_1}$ and the section marked "f" is used to calculate $\hat{\beta_2}$, good job! So let's see what happens when we compare a "healthy" model with a model with high multicollinearity:
+
+```{r}
+#| label: imperfect
+
+# make a healthy model (A)
+fit1 <- euler(c("X1" = 10, "X2" = 10, "Y" = 15, 
+                "X1&X2" = 2, "X1&Y" = 5, "X2&Y" = 5, "X1&X2&Y" = 1))
+
+# make an unhealthy model (B)
+fit2 <- euler(c("X1" = 8, "X2" = 8, "Y" = 8, 
+                "X1&X2" = 5, "X1&Y" = 2, "X2&Y" = 2, "X1&X2&Y" = 10))
+
+plot1 <- plot(fit1, 
+              quantities = FALSE, 
+              main = "Low Collinearity\n(plenty of unique info)")
+plot2 <- plot(fit2, 
+              quantities = FALSE, 
+              main = "High Collinearity\n(very little unique info)")
+
+grid.arrange(plot1, plot2, ncol = 2)
+
+```
+
+The sections equivalent to "e" and "f" in the second part have shrunken down to almost nothing. this is because our equation for $\hat{\beta}_1$ is a function of the variance in $X_1$ that is *not* explained by $X_2$. When we have high multicollinearity, the variance in $X_1$ that is not explained by $X_2$ becomes very small, which causes the standard error to become very large. This can lead to a higher risk of committing Type II errors, as we might fail to detect a significant effect of a predictor variable on the dependent variable because the standard error is too large.
+
+::: question
+Wait, why does this happen?
+:::
+
+My bad. Let me slow down a bit. Remember this equation?
+
+$$
+\hat{\beta}_1 = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sum (x_i - \bar{x})^2 \bbox[white, 2pt, border: 1.5px solid red]{(1 - R^2_{x_1|x_2})}}
+$$
+
+I've put a red box around the relevant term in the denominator of the equation. This term represents the proportion of the variance in $x_1$ that is *not* explained by $x_2$. We get this by estimating the auxilliary regression $x_1 = b_0 + b_1x_2 + e$ and using the $R^2$ value from that regression. When we have high multicollinearity, the term in red becomes very small. The same thing will happen in our estimate of $\hat{\beta}_2$ because the same term will be in the denominator of that equation. This means that there is less information about the independent relationship between $Y$ and each of the predictor variables. This means that the estimate of the $\hat{\beta}$s becomes less precise.
+
+::: question
+Less precise? Does that mean *biased*?
+:::
+
+Not quite. The resulting estimates of $\hat{\beta}_1$ and $\hat{\beta}_2$ will still be unbiased, meaning that they will still be centered around the true value of the parameter in the population. But the estimates will be less precise, meaning that they will have a larger variance. This is because the high multicollinearity makes it difficult to determine the individual effect of each predictor variable on the dependent variable. The estimates will be more unstable and can vary widely from sample to sample, even though they are still centered around the true value of the parameter in the population.
+
+So the real problem comes with the standard errors. See, the estimates of $\beta$ will be unstable, but not predictably wrong in any knowable direction (this would be bias). You'll remember, though, that this same term ($1-R^2_{x_1|x_2}$) is in the denominator of the variance formula for $\hat{\beta}_1$ and $\hat{\beta}_2$.
+
+$$
+\textrm{Var}(\hat{\beta}_1) = \frac{\sigma^2}{\sum (x_i - \bar{x})^2 \bbox[white, 2pt, border: 1.5px solid red]{(1 - R^2_{x_1|x_2})}}
+$$
+
+This means that when we have high multicollinearity, the variance of our estimates becomes very large. This can lead to a higher risk of committing Type II errors. We can see this in the figure below. There, I've simulated some data and run a bunch of models under conditions of low multicollinearity ($\rho = 0.10$) and high but imperfect multicollinearity ($\rho = 0.90$). The figure shows the distribution of $\hat{\beta}_1$ over 1,000 simulations for the low multicollinearity (teal) and high multicollinearity (peach) models. I've set the true value of $\beta_1$ at 2, which is indicated by the dashed vertical line. We can see that the distribution of $\hat{\beta}_1$ for the model with high multicollinearity is much wider than the distribution for the model with low multicollinearity, which indicates that the estimates are less precise in the presence of high multicollinearity.
+
+```{r}
+#| label: sims
+
+# set parameters 
+n_sims <- 1000
+n_obs <- 100
+true_beta1 <- 2
+true_beta2 <- 5
+
+# fake some data
+run_sim <- function(rho) {
+  replicate(n_sims, {
+    # correlated predictors
+    x1 <- rnorm(n_obs)
+    x2 <- rho * x1 + sqrt(1 - rho^2) * rnorm(n_obs)
+    # generate Y based on true parameters + noise
+    y <- true_beta1 * x1 + true_beta2 * x2 + rnorm(n_obs, sd = 1)
+    # get the estimate for beta 1
+    coef(lm(y ~ x1 + x2))[2]
+  })
+}
+
+# run for low (0.1) and high (0.99) correlation
+results <- data.frame(
+  Low_Collinearity = run_sim(0.1),
+  High_Collinearity = run_sim(0.99)
+) %>% pivot_longer(cols = everything(), names_to = "Scenario", values_to = "Estimate")
+
+# plot the distribution
+ggplot(results, aes(x = Estimate, fill = Scenario)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = true_beta1, linetype = "dashed", size = 1) +
+  labs(title = "Distribution of Beta-hat 1 over 1,000 Simulations",
+       subtitle = paste("True Beta 1 =", true_beta1),
+       x = "Estimated Value of Beta 1", y = "Density") +
+  theme_minimal()
+```
+
+The figure shows that both distributions are centered on the true value, but one model is much worse at getting close to the true estimate (the high collinearity model) than the other (the low collinearity model). This is because the high multicollinearity makes it difficult to determine the individual effect of each predictor variable on the dependent variable, which leads to less precise estimates and a higher risk of committing Type II errors.
+
+We can see evidence of this problem in our models if the $R^2$ for the model is fairly high but none of the coefficients are significant. This is a common sign of problematic multicollinearity. But it can be hard to identify if we have a model with a lot of predictor variables, as our real life models usually do.
+
+::: question
+Ok, I get it now. So how do I know if this is a problem in my model?
+:::
+
+Good question. I'm so glad you asked!
+
+## Diagnosing Problematic Multicollinearity
+
+To diagnose problematic multicollinearity, a good starting point is to look at the correlation matrix of our predictor variables. If we see high correlations (e.g., above 0.7 or 0.8) between two or more predictor variables, this could be a sign of multicollinearity. However, this is not always a reliable method, especially if we have a lot of predictor variables.
+
+A more reliable method is to calculate the *variance inflation factor* (VIF) for each predictor variable. The VIF measures how much the variance of the estimated regression coefficients is inflated due to multicollinearity. The VIF for a predictor variable is calculated as:
+
+$$
+\textrm{VIF} = \frac{1}{1 - R^2_{x_k|x_{-k}}}
+$$
+
+Do you recognize anything in this equation?
+
+::: question
+Isn't the denominator equivalent to the part in red in the previous equations?
+:::
+
+It sure is. Good catch. Here $R^2_{x_k|x_{-k}}$ is the coefficient of determination from a regression of the predictor variable $x_k$ on all the other predictor variables in the model. In the model with just two collinear predictors, the $R^2$ from the auxiliary regression on $X_1$ and $X_2$ will be the same, such that $VIF_{X1}=VIF_{X2}$. However, adding more predictor variables in the model (as most of our real-world models will have) complicates things. The changes in the notation here reflect the fact that we're now looking at the relationship between $x_k$ and *all* of the other predictor variables in the model (denoted by $x_{-k}$).
+
+So, to calculate the VIFs for the model with more than two predictors, we need to run auxiliary regressions for each of the variables in the model. For example, if we have a model with three predictor variables ($x_1$, $x_2$, and $x_3$), we would run three auxillary regressions:
+
+1.  $x_1 = b_0 + b_2 x_2 + b_3 x_3 + e$
+2.  $x_2 = b_0 + b_1 x_1 + b_3 x_3 + e$
+3.  $x_3 = b_0 + b_1 x_1 + b_2 x_2 + e$
+
+Then, we would calculate the VIF for each predictor variable using the $R^2$ value from the corresponding auxiliary regression. The VIF tells us how much the variance of the estimated regression coefficient for $x_k$ is inflated due to multicollinearity. A VIF of 1 means that there is no multicollinearity, while a VIF greater than 1 indicates that there is some degree of multicollinearity. The higher the VIF, the more severe the multicollinearity problem is.[^1]
+
+[^1]: You might also see reference sometimes to the *tolerance* as an alternative measure of problematic multicollinearity. The tolerance is just the inverse of the VIF, such that $\textrm{TOL}_x = 1/\textrm{VIF}_x$.
+
+::: question
+What if I don't want to run a whole bunch of extra regressions?
+:::
+
+This sounds like a real drag, doesn't it? Fortunately, there are functions in R that can calculate the VIFs for us. For example, the `car` package has a function called `vif()` that can be used to calculate the VIFs for each predictor variable in a regression model. This function will run the necessary auxiliary regressions and return the VIF values for each predictor variable. A common rule of thumb is that if the VIF for a predictor variable is greater than 5 or 10, this could be a sign of problematic multicollinearity.
+
+Some of the common signs that your model has problematic multicollinearity are:
+
+1.  variables are insignificant BUT overall model fit statistics are relatively high AND/OR
+2.  a likelihood ratio test comparing your model with and without one of the variables favors the model with the variable included even though the variable is not significant AND/OR
+3.  a correlation matrix of the predictor variables shows high correlations between two or more predictor variables AND/OR
+4.  small changes in specification $\rightarrow$ big differences in coefficient estimates OR
+5.  the model run on a random subset of data has very different coefficient estimates than the model run on the full data.
+
+But you might not need to know all of these things. Testing for multicollinearity is incredibly easy in R, so you should *always* check for it when you run a regression model with more than one predictor variable. Here are some of the key tools to use:
+
+1.  `cor()`, `Hmisc::rcorr()`, `psych::pairs.panel()`, or another correlation matrix function to calculate the correlation matrix for the predictor variables in the model and identify any high correlations AND either
+2.  `usdm::vif()` to calculate the VIFs for each of the variables in whichever data subset you feed to the function (this one can be done without a model object, so you can do this before you estimate the model), OR
+3.  `car::vif()`, `olsrr::ols_coll_diag()`, or a similar function to calculate the VIFs for each predictor variable in the model by including the model fit object as an argument.
+
+We'll see how these work in the example below. First, let's talk about what options we have for dealing with problematic multicollinearity.
+
+## Addressing Problematic Multicollinearity
+
+How we deal with multicollinearity depends on why we think we have the multicollinearity in the first place. In most discussions of multicollinearity, the focus is on what is called **essential multicollinearity**. This is the type of multicollinearity that arises when two or more predictor variables are measuring the same underlying concept. For example, if we have two predictor variables that are both measuring income in a slightly different way, we might expect them to be highly correlated with each other. This could lead to problematic multicollinearity. Most of the strategies you'll find to deal with multicollinearity assume that this is what's happening in your data.
+
+### Get More Data
+
+For essential multicollinearity, there are a few main treatments. The first one is the most annoying: **get more data**. It's usually the case that we're doing the best we can with the data we have, so it can be enraging to hear that we should just "get more." But it is a potential option if collecting (or using) more data is possible. Doing this can help us accomplish one or more of the following:
+
+1.  *Break the Correlation.* If two variables are highly correlated (e.g., in a small sample, they always move together), collecting more data in diverse scenarios can create situations where they move independently.
+
+2.  *Reduce Standard Errors.* Multicollinearity inflates the variance (standard errors) of coefficients, making them unreliable. A larger sample size generally lowers these standard errors, providing more precise estimates of the coefficients.
+
+3.  *Improve Precision.* By adding more data points, the model obtains more information about the unique variance of each predictor, which mitigates the issue of shared variance that causes high VIF (Variance Inflation Factor) values.
+
+::: question
+I'm not doing this. Any other options?
+:::
+
+### Dropping a Variable
+
+The second answer is probably the most obvious: *drop one (or more) of the variables* from the model. If two predictor variables are measuring the same underlying concept, we might not need both of them in the model.
+
+::: question
+That makes sense, but how would we choose which one to keep?
+:::
+
+There are a few ways we can think about which variable to drop. We could just choose to drop the variable with the highest VIF. This makes some intuitive sense, given what the VIF represents. Since the VIF is a measure of how much the variance of the estimated regression coefficient is inflated due to multicollinearity, it seems reasonable to drop the variable with the highest VIF to reduce the multicollinearity problem.
+
+Before you jump directly to this solution, though, it's important to consider the theoretical relevance of the variables in question. If one of the variables is more theoretically relevant to your research question, it might make more sense to keep that variable in the model and drop the other one, even if it has a higher VIF. Beyond that, we might also prefer to keep the measure that has been more thoroughly validated, the one that is more commonly used in the existing literature, and/or has better measurement properties and drop the other one.
+
+Dropping a variable can be a good option in a lot of circumstances. Perhaps you didn't realize that you'd included two measures of the same concept. In other words, if the second variable is truly redundant, it's best to drop it. This might also be the case if you want to prioritize parsimony and ease of interpretation over its raw predictive power in your model. Because social scientists are usually estimating regression models for the purposes of hypothesis testing instead of for prediction, this is often the case foe us.
+
+However, if both variables are theoretically relevant and provide unique information about the underlying concept, dropping one of them might not be the best option.
+
+::: question
+Shoot. So now what?
+:::
+
+Luckily, I've got a few more tricks up my sleeve.
+
+### Combine Variables
+
+If getting more data or dropping variables won't work for us, we could turn the affected variables into *a composite index*. In other words, we can combine more than one variable as a way to preserve the contributions of each without the multicollinearity.
+
+The simplest way to create an index by adding together or taking the average of the variables. Either of these can be a good option if the variables are on the same scale and have similar measurement properties. If the variables are on different scales or have different measurement properties, we might want to standardize them before creating the index. This can be done by subtracting the mean and dividing by the standard deviation for each variable.
+
+Note, though, a warning about using an additive index. If you have any missing data, an additive index will artificially lower the index scores of the resulting index; in this case, using the average can be a good solution. As such, I usually end up using the average.
+
+::: question
+This sounds like a good option. But is it a pain?
+:::
+
+In R, it's pretty easy to create index variables. We can use the `rowMeans()` function to create an average index, and we can use the `scale()` function to standardize the variables before creating the index. This can help us preserve the contributions of each variable while reducing the multicollinearity problem.
+
+::: question
+So, is this our answer?
+:::
+
+An average index can be a good option. Honestly, this is what I usually end up with. However, before I implement this, I generally explore one more option: principal components factor analysis. This strategy gives us a sense of how reasonable it is to create a single variable out of the two (or more) variables in question, and it can also help us create a more precise measure of the underlying concept that the variables are measuring.
+
+Principal components factor analysis (PCA) is a method to reduce the dimensionality of our measures of the same underlying concept (or "latent variable" in psychometric-speak). It finds the underlying patterns of overlap among two or more variables and captures that in "orthogonal" factor scores. This just means that it captures the various dimensions of what underlies the overlap of these measures in ways that are much less highly collinear.
+
+::: question
+It reduces dimensionality? What is it...*magic*?
+:::
+
+PCA is definitely not magic. It reduces the dimensionality of a group of variables by transforming the original set of correlated predictor variables into a smaller set of uncorrelated components, called principal components (PCs). It deals with multicollinearity in linear regression by creating orthogonal (independent) predictors, eliminating the high correlation between variables that causes unstable regression coefficient estimates.
+
+The dimension reduction basically means that the process looks for combinations of the variables that capture the most variance in the data. The first principal component captures the most variance, the second captures the second most, and so on. By selecting a subset of these principal components that explain most of the variance, we can reduce the number of predictors while retaining most of the information in the original variables. The resulting variables are uncorrelated, which helps to stabilize the regression coefficients and improve the interpretability of the model.
+
+::: question
+Why are you saying "variables"? I thought we were looking for just one index variable!
+:::
+
+Good catch. Because PCA finds the PCs in descending order by the amount of underlying variance they explain, we can often just use the first PC as a single index variable that captures the underlying concept that the original variables were measuring. This is especially true if the first PC explains a large proportion of the variance in the original variables. However, if the first PC does not explain a large proportion of the variance, we might want to consider using more than one PC as predictors in our regression model.
+
+::: question
+This sounds fancy. Is it hard to do?
+:::
+
+In R, this isn't really that hard. Generally speaking, we'll still start by standardizing the variables that we want to include in the PCA. We also want to ensure that the variables are all "pointed" in the same direction (such that a bigger value means more of the underlying concept and a smaller value means less of it). Then, we can use the `prcomp()` function with the option `scale.=TRUE` to perform the PCA and extract the principal components. From there, we select the number of principal components to include in our regression model based on how much variance they explain. Finally, we can use these principal components as predictors in our regression model instead of the original variables.
+
+::: question
+Is this too good to be true?
+:::
+
+This isn't really too good to be true, but there are some drawbacks to this approach. One of the main drawbacks is that the resulting principal components can be difficult to interpret. Imagine we have a bunch of different survey measures of the same underlying construct that use the same measurement scale (something like 1 = not at all, 2 = somewhat, 3 = quite a bit, 4 = a lot). If we combine them by taking the average, we still preserve the underlying scale as signposts to help us interpret the meaning of a score like 2.5 (halfway between "somewhat" and "quite a bit".
+
+It's not that easy when we're using PCA. Since our principal components are linear combinations of the original variables, it can be hard to understand what they represent in terms of the underlying concept. We make this even more confusing if we include two measures of the same thing. It's not self-evident when looking at the PCA results which substantive "dimension" of the underlying construct each of the principal components is meant to represent. This makes it difficult to even explain what the additional measures even mean, much less how to interpret their values. So, if we use more than one principal component as predictors in our regression model, we might end up with a model that is more complex and harder to interpret than the original model with the original variables.
+
+::: question
+So are you saying that I shouldn't bother with PCA?
+:::
+
+I'm not saying this at all. I know that I said earlier that I almost always *end up* using an average index, but that doesn't mean that I don't also use PCA. I often use PCA as a way to explore the underlying structure of the data and to get a sense of how reasonable it is to create an index variable out of the original variables. If the first principal component explains a large proportion of the variance in the original variables, then I might feel more comfortable using an average index. When I do this, I'll report a correlation coefficient between the first factor of my PCA and the average index to show that they are capturing the same underlying concept.
+
+The first primary component (which is sometimes short-handed as the "first factor") and the average index are almost always very highly correlated. In fact, I've never had a situation in real life where I really needed to use more than one of the factors in the model. Letting the reviewers know that I've done the PCA and that the resulting measure is not very different from the average index goes a long way toward reassuring them. It makes it clear that I'm not just averaging a bunch of random variables together, but instead that the index is a good composite measure of the underlying concept that the original variables were measuring.
+
+However, if the first principal component does not explain a large proportion of the variance, I might consider using more than one principal component as predictors in my regression model. Before I did this, however, I'd also want to see whether I can identify which substantive "dimension" of the underlying construct each of the principal components is meant to represent. I can do this by looking at a **biplot**, which shows each factor along with the variables that contribute most to each. If I can see a pattern (such that I can identify, for example, that the first factor represents something like "attitudes toward social spending" and the other represents something like "attitudes toward defense spending"). If I can do this, then I might feel more comfortable using more than one principal component as predictors in my regression model. But if I can't do this, then I might just stick with the average index, even if it doesn't explain as much variance as the first principal component.
+
+::: question
+Ok. So I probably do all of this PCA stuff only to end up using an average index. Got it. But didn't you say there was another option?
+:::
+
+### Other Options
+
+There are a couple of other options you could use to deal with problematic multicollinearity. I'm not going to go into too much detail on these here, since the vast majority of multicollinearity issues you're likely to come across will be easily handled using the strategies we've already covered. However, since you seem to want to get into the weeds a bit more, I'll give you a little taste here.
+
+One of the other options for dealing with problematic multicollinearity is to use **ridge regression**. Ridge regression is a type of regularized regression that adds a penalty term to the ordinary least squares (OLS) regression objective function. This penalty term shrinks the coefficients of the predictor variables towards zero, which can help to reduce the variance of the estimates and mitigate the effects of multicollinearity. However, ridge regression does not perform variable selection, meaning that it does not set any coefficients exactly to zero. This means that all predictor variables will still be included in the model, albeit with shrunken coefficients.
+
+A second alternative option might be to use **Lasso regression**. Lasso regression is another type of regularized regression that adds a different penalty term to the OLS regression objective function. This penalty term not only shrinks the coefficients of the predictor variables towards zero but also has the property of setting some coefficients exactly to zero when the penalty is sufficiently large. This means that lasso regression can perform variable selection by effectively removing some predictor variables from the model, which can help to mitigate the effects of multicollinearity.
+
+I'll introduce you to lasso regression in some of the 703 homeworks next term, but we'll be using them for different (and probably destructive) purposes. For now, just know that these are two additional options for dealing with problematic multicollinearity, but they are generally not the first line of defense. They can be useful in certain situations, especially when we have a large number of predictor variables and we want to perform variable selection. However, they can also make our models more complex and harder to interpret, so it's important to use them judiciously.
+
+::: question
+Sounds intriguing. But I thought you said there were some situations where we don't need to worry about multicollinearity. What's up with that?
+:::
+
+## Structural Multicollinearity
+
+There are some situations where we're not going to care very much about high VIF values. This happens when we're dealing with something called **structural multicollinearity.** Unlike essential multicollinearity, which arises when two or more predictor variables are measuring the same underlying concept, structural multicollinearity arises when we have a particular configuration of the predictor variables in our model. Structural multicollinearity is a researcher-induced, mathematical artifact arising from creating new predictors from existing ones (e.g., $X$ and $X^2$). The most common examples of this are when our model includes dummy variables and/or an interaction term (or terms). The reason for this has to do with what the parameter estimates for these variables actually represents in the model.
+
+::: question
+What it represents? Isn't it just a partial slope coefficient like the other variables in the model?
+:::
+
+It seems like it would be, doesn't it? But it's a bit more complicated than that. First, let's take the simpler case of dummy variables.
+
+For dummy variables, the parameter estimate represents the difference in the dependent variable, on average, between the category represented by the dummy variable and the reference category. Instead of acting as a partial slope coefficient, the parameter estimate for a dummy variable is actually an alternative intercept for the category identified in the dummy variable. To be more precise, if you add the value of the dummy variable's coefficient to the existing intercept, you get the intercept for the category identified in the dummy variable. This means that the parameter estimate for a dummy variable is not really a function of the unique variance in that variable, but rather a function of the difference in the dependent variable between the category represented by the dummy variable and the reference category. Therefore, we can tolerate high VIF values for dummy variables without worrying about problematic multicollinearity.
+
+::: question
+That makes sense. But why would VIFs matter less for interaction terms that aren't just dummy variables? Aren't those parameter estimates partial slopes, not intercepts?
+:::
+
+Fantastic question. Your intuition here is right. Now, if we have an interaction term between two dummy variables, we're actually creating a bunch of intercept terms and no additional partial slope estimates. In this situation, we can look past high VIF values for the same reason we did for dummy variables.
+
+For other interaction terms, the parameter estimate represents the difference in the effect of one predictor variable on the dependent variable at different levels of another predictor variable. With these interaction terms, we're actually a lot more likely to see high VIFs because the interaction term is a product of the two predictor variables. This, of course, can lead to high correlations between the interaction term and the main effects.
+
+However, the parameter estimate for an interaction term is not really a function of the unique variance in that variable, but rather a function of the difference in effects between levels of the other predictor variable. Therefore, we can tolerate high VIF values for interaction terms without worrying about problematic multicollinearity.
+
+Consider this simple model:
+
+$$Y = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \varepsilon$$ In this equation, $\beta_1$ represents the independent effect of $X_1$ on $Y$, all else equal. Now, if we add an interaction term between $X_1$ and $X_2$, we get:
+
+$$Y = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \beta_3 (X_1 \times X_2) + \varepsilon$$ In this equation, $\beta_3$ represents the difference in the effect of $X_1$ on $Y$ when $X_2 = 0$ versus when $X_2 = 1$. But what happens when a particular range of $X_1$ is never observed in the dataset at $X_2 = 0$? If it is outside the range of your data, The parameter estimate for the interaction term is not really a function of the unique variance in that variable, but rather a function of the difference in effects between levels of $X_2$. Therefore, we can tolerate high VIF values for interaction terms without worrying about problematic multicollinearity.
+
+::: question
+This doesn't seem like it should work. Are you sure?
+:::
+
+I get it. It seems like it should matter, doesn't it? Well, one way we can see this is to see the impact of mean-centering our variables on the resulting VIF scores. Say we've got a model that predicts fitness ($Y$) as a function of age ($X_1$), minutes of exercise ($X_2$), and the interaction between age and exercise ($X_1 \times X_2$). If we run this model with the raw variables, we might see some pretty high VIF values for the main effects and the interaction term. However, if we mean-center the age and exercise variables before creating the interaction term, we should see much lower VIF values for all three variables. This is because mean-centering reduces the correlation between the main effects and the interaction term, which in turn reduces the multicollinearity problem. I do this below with some simulated data to show you how this works in practice.
+
+```{r demo}
+
+# simulate data
+set.seed(1975)
+n <- 100
+age <- rnorm(n, mean = 45, sd = 5)      # age (cannot be zero)
+exercise <- rnorm(n, mean = 20, sd = 5) # minutes of exercise
+
+y <- 0.5*age + 0.2*exercise + 0.1*(age * exercise) + rnorm(n, sd = 2)
+
+df <- data.frame(age, exercise, y)
+
+# raw interaction model
+model_raw <- lm(y ~ age * exercise, data = df)
+
+# mean-centered model
+df$age_c <- df$age - mean(df$age)
+df$exercise_c <- df$exercise - mean(df$exercise)
+model_centered <- lm(y ~ age_c * exercise_c, data = df)
+
+
+# calculate vifs
+vif_raw <- vif(model_raw)
+vif_centered <- vif(model_centered)
+
+# tables
+cat("--- VIF COMPARISON ---\n")
+print(rbind(Raw = vif_raw, Centered = vif_centered))
+
+cat("\n--- INTERACTION COEFFICIENT COMPARISON ---\n")
+print(rbind(
+  Raw = tidy(model_raw)[4, c("estimate", "std.error", "p.value")],
+  Centered = tidy(model_centered)[4, c("estimate", "std.error", "p.value")]
+))
+```
+
+This table shows the comparison. The VIFs for the raw model with structural multicollinearity are much higher than the VIFs for the mean-centered model. However, the coefficient estimates, standard errors, and p-values for the interaction term are the same in both models. This illustrates that we can tolerate high VIF values for interaction terms without worrying about problematic multicollinearity.
+
+::: question
+Ok, I think I get it now. But how do I make use of all of this information when I'm estimating my own models?
+:::
+
+I thought you'd never ask!
+
+## Our Example
+
+Let's walk through an example of what this looks like in practice. We'll focus on essential multicollinearity, since that's the more problematic type. If we're dealing with structural multicollinearity, we'll know to consider mean-centering the components of the interaction term.
+
+For simplicity, let's just use the sample dataset `mtcars`. Let's say we want to use `mpg` for the dependent variable. We think that `mpg` is a function of `disp`, `hp`, and `wt`.
+
+```{r}
+#| label: example
+#| results: 'asis'
+
+stargazer(mtcars, type = "html")
+
+```
+
+Here we've got some descriptive statistics of the continuous variables in the model. Next, let's take a look at the interrelationships among the independent variables we're interested in.
+
+```{r, warning=FALSE}
+#| label: pairs
+#| warning: false
+
+mt.sm <- mtcars %>%
+  dplyr::select(disp, hp, wt, qsec)
+
+pairs.panels(mt.sm,                     # choose variables
+             method = "pearson",        # correlation method
+             hist.col = "#00AFBB",      # color for the histograms
+             density = TRUE,            # density plot (not frequency)
+             ellipses = TRUE,           # show correlation ellipses
+             panel.hist = TRUE)         # display histograms on the 
+
+```
+
+Excellent. I used the `psych::pairs.panels` function to visualize this, although a simple correlation matrix is also just fine. Now we can see that there's some pretty high bivariate correlations here. What happens if we try to run a linear model on these?
+
+::: question
+I bet the coefficients aren't significant but the $R^2$ is high, right?
+:::
+
+Good! You've been listening. Let's see if that's the case.
+
+```{r, results = 'asis'}
+
+ols.fit <- lm(mpg ~ disp + hp + wt + qsec, 
+              data = mtcars)
+
+htmlreg(ols.fit, 
+        single.row = TRUE)
+
+ols.stats <- glance(ols.fit)
+
+```
+
+As you predicted coefficients aren't very significant here despite the fact that $R^2 =$ `r round(ols.stats$r.squared, 2)`. Let's take a look and confirm that problematic multicollinearity is driving this. Here, I'll use the function `car::vif` to obtain the Variance Inflation Factors for each independent variable in the model. This is more helpful than just looking at the bivariate correlations. Remember that the thing we're concerned about is that we've got two or more variables *which, on their own, are important predictors of Y*. Because of the degree to which the Xs are interrelated, though, our estimators cannot attribute that explanatory power to the "appropriate" X variables. This means that, in order to detect *problematic* multicollinearity (i.e., the type that inflates our standard errors and leads to Type II errors), we need to evaluate the entire system at the same time (and not just variables pair-by-pair).
+
+The Variance Inflation Factor (VIF) can do this for us. It does this by running separate models of each X with the remaining Xs as the explanatory variables. The value $1-R^2$ from each model represents the tolerance of the overall model to the inclusion of that X variable. If $\textrm{TOL}=0$, then that $X_k$ variable is perfectly predicted by other $X$s. This would be *perfect* multicollinearity, which would cause your estimation to fail.
+
+The next step is to use the tolerance to calculate the VIF. The two are related like this: $\textrm{VIF} = \frac{1}{\textrm{TOL}}$ This represents the degree to which the standard errors in the model would be inflated by including this X variable in the model (more precisely, $\sqrt{\textrm{VIF}}$ is the amount of standard error inflation derived from including this variable). If $\textrm{VIF}>5$ or so, we've got high multicollinearity that could start causing an increased risk of committing Type II errors.
+
+::: question
+Okay, okay...but does this mean I need to do math?
+:::
+
+No. We don't have to do math because we have R! We'll just use `vif()` to do this for us. Remember that we're going to start worrying about multicollinearity when we have VIF values above 5; although some folks will say 10, I tend to think this is too high. Let's see what we get here.
+
+```{r, echo = TRUE}
+
+kable(vif(ols.fit)) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+So, it looks like we do have some problematic multicollinearity here. We've got more than one of our variables with high VIFs. Thankfully, we know what our options are for dealing with this:
+
+Our first option is to just get more data. Now, it's probably obvious that this little dataset is only 32 observations, so it's very small. It's possible that more data would fix this issue. But we don't have the time nor the inclination to collect more data on this, so we'll move to our next option.
+
+The next option is to simply drop one (or more?) of the variables with high VIF scores and then re-run the model without it. This can work well for variables that aren't really the focus of our inquiry. Here, we might pull out `mtcars$disp` and see what happens.
+
+```{r, results = 'asis'}
+
+ols2.fit <- lm(mpg ~ hp + wt + qsec, data = mtcars)
+htmlreg(list(ols.fit, ols2.fit), single.row = TRUE)
+kable(vif(ols2.fit)) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+Here, we can see that our goodness of fit diagnostics remain similar. We've got a similar estimate for $\beta_{wt}$, but the standard error is much smaller. The VIF for `hp` is still pretty high, but it's right around the cutoff. We could probably go ahead and drop another of the variables if we wanted to. Overall, dropping variables *could* be a good answer, particularly when we're talking about measures that are highly related but aren't *created with the purpose* of being different ways of measuring the same underlying concept. This, of course, only really works if we don't actually need to control for both in our model for the purposes of our hypothesis testing needs.
+
+::: question
+So what's next? Combining the variables?
+:::
+
+That's right. Let's go on a bit of a journey and assume that these variables (`disp`, `wt`, and `hp`) *are* actually intended to measure the same thing in two different ways. If this is the case, including both might help to protect us against measurement error in X (which is really bad). However, if we just chuck them both into the model, we'll end up with inflated standard errors on account of the problematically high multicollinearity.
+
+So, what to do? Let's try some principal components factor analysis. Our first step is quite important. We need to make some decisions about the shape our variables should be in before we put them in the PCA. PCA basically find the "center of gravity" of the data cloud and then tries to determine the axes along which most of the variation is most apparent. If we use `prcomp()`, the function does this part automatically. However, we also want to consider standardizing the variables. If our variables are measured in the same units (i.e., a 1-7 scale), we might not need to standardize them. This is because the distance between two points on that scale is the same theoretical distance for each of the component variables.
+
+But if they're measured in different units as ours are (e.g., one variable is in dollars and another variable is in minutes), we probably want to standardize them before running the PCA. This can be done by centering the variables (subtracting the mean) and scaling them (dividing by the standard deviation). This way, we can ensure that the PCA captures the underlying structure of the data without being influenced by the scale of the variables. I'm going to do this the easy way by using the `scale()` function across all of the selected variables before putting them into the dataframe for the PCA. This will automatically center and scale the variables for us. This is important because if we don't do this, the PCA might be dominated by the variable with the largest scale, which could lead to misleading results.
+
+```{r}
+
+# select the collinear measures, center them, and put them in a data frame
+mt.ty <- mtcars %>%
+  dplyr::select(disp, hp, wt) %>%
+  mutate(across(everything(), ~ as.vector(scale(.))))
+
+# fit the principal components model on those variables
+pcf.fit <- prcomp(mt.ty, scale. = TRUE) 
+
+# produce some summary information about the extracted components
+summary(pcf.fit) 
+
+# generate scree plot
+plot(pcf.fit) # shows how much of the variance is explained by each component
+
+```
+
+Here, we can see that the relative importance of each of the components decreases. This is by design. It doesn't look like the third component explains much, but for fun let's try generating some factor scores for all of the derived components and then include them in the model in the place of the three variables we're taking out.
+
+```{r, results = 'asis'}
+
+mt.df <- mtcars %>%
+  dplyr::select(mpg, disp, hp, wt, qsec)
+mt.df$pcf1 <- pcf.fit$x[,1]
+mt.df$pcf2 <- pcf.fit$x[,2]
+mt.df$pcf3 <- pcf.fit$x[,3]
+
+pcf.mod <- lm(mpg ~ pcf1 + pcf2 + pcf3 + qsec, data = mt.df)
+pcf2.mod <- lm(mpg ~ pcf1 + qsec, data = mt.df)
+
+htmlreg(list(ols.fit, ols2.fit, pcf.mod, pcf2.mod), single.row = FALSE)
+
+```
+
+Again, we can see that our goodness of fit diagnostics are still about the same. Only the first factor score is significant in the model, though, so we can probably remove the others. I went ahead and did that in model 4. So this might be a solution to reducing the dimensionality of a particular set of measures intended to capture the various dimensions of an underlying concept. However, it does not come without its downsides. While it might be fairly straightforward to interpret the impact of a one-unit increase in horsepower or weight, it's not very clear how to interpret a one-unit change in this factor score. This factor score isn't on the same scale as the variables that feed into it.
+
+::: question
+Yeah, our reviewers aren't going to like this, are they?
+:::
+
+No, they probably won't like this at all. The model is very difficult to interpret. This is especially problematic if our main variable of interest is part of the factor scores. One way around this is to use PCF behind the scenes. If we run the PCF analysis and derive the factor scores, we can use that to see how well we could capture the underlying concept if we used a more easily interpretable way to combine the variables, like the average of the variables or an additive index (meaning the sum of all of the variables). For the reasons I explained earlier, I'm going to go with the average index.
+
+I'm going to show you how to do this here, but it's not going to make as much sense in the context of our example as it would if we were looking at a political psychology battery; such a battery is generally a group of survey questions with the same scale for the responses, making the resulting variable a function of the scale of those underlying variables. Here, notice that I'm scaling the three variables before creating the additive index. This is important because the variables are on different scales. If we didn't do this, the resulting index would be dominated by the variable with the largest scale (in this case, `disp`), which could lead to misleading results.
+
+```{r}
+
+mt1.df <- mtcars %>%
+  mutate(across(c(disp, hp, wt), 
+                ~ as.vector(scale(.)))) %>%
+  mutate(comp = rowMeans(
+    across(c(disp, hp, wt))))
+
+# check the correlation
+cor(mt1.df$comp, mt.df$pcf1)
+
+```
+
+Here, we can see that our new score, `comp`, is very highly correlated with the first component we derived from our PCF analysis (`pcf1`) at $\hat{\rho} \approx 1.00$. This means that it makes sense to use our new variable instead of the PCF component score, since it will capture almost exactly what the component score brings to the table, but it will still maintain a recognizable scale for easier interpretation.
+
+```{r, results = 'asis'}
+
+comp.mod <- lm(mpg ~ comp + qsec, data = mt1.df)
+
+htmlreg(list(ols.fit, pcf2.mod, comp.mod), single.row = FALSE)
+
+```
+
+Here, I've included the original OLS model as model 1, our model replacing the three collinear variables with the first PCA factor as model two, and the same model swapping the index measure for the PCA factor. This is also what I recommend when you're making an index of multiple different measures to use as a dependent variable. Again, the simpler version is preferable because it retains interpretability on account of its scale. It shows that a one-unit increase from the mean of our index variable is associated with a `r round(comp.mod$coefficients[2], 3)` unit change in miles per gallon. However, it's important to make sure that the index variable you create is highly correlated with the factor scores from a PCF, since this is a "gut check" that it makes sense to summarize the variables the way you do. An alternative to this is to conduct what's called an alpha analysis (or Cronbach's Alpha). This gives us a sense of the consistency of the measure. There's a really good summary of exploratory factor analysis and Cronbach's Alpha here: <https://rpubs.com/pjmurphy/758265> .
+
+------------------------------------------------------------------------
+
+## References
