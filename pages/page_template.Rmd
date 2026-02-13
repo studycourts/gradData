@@ -1,0 +1,68 @@
+---
+title: "Template"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
+output:
+  bookdown::html_document2:
+    number_sections: FALSE
+    toc: false
+    code_folding: hide
+    self_contained: true
+    base_format: rmarkdown::html_document
+bibliography: hw.bib
+csl: gill_apsr.csl
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{css, echo = FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+/* This code defines the highlighted "mark" tag */
+
+mark {
+  background-color: LemonChiffon;
+  color: black;
+}
+
+/* This code makes the tables a little nicer. */
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width:80%;
+  white-space:nowrap;
+}
+
+```
+
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      cache = FALSE)
+
+```
