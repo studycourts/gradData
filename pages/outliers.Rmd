@@ -1,0 +1,565 @@
+---
+title: "Outliers and Influential Observations"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
+output:
+  bookdown::html_document2:
+    number_sections: FALSE
+    toc: false
+    code_folding: hide
+    self_contained: true
+    base_format: rmarkdown::html_document
+bibliography: hw.bib
+csl: gill_apsr.csl
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{css, echo = FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+/* This code defines the highlighted "mark" tag */
+
+mark {
+  background-color: LemonChiffon;
+  color: black;
+}
+
+/* This code makes the tables a little nicer. */
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width:80%;
+  white-space:nowrap;
+}
+
+```
+
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      cache = FALSE)
+
+```
+
+```{r}
+#| label: libs
+
+library(texreg)       # pretty model tables
+library(car)          # helpful summary functions
+library(carData)      # data to use with car functions
+library(ggcorrplot)   # pretty correlation matrices
+library(stargazer)    # pretty tables 
+library(kableExtra)   # makes kable tables prettier
+library(ggeffects)    # to plot predictions from models
+library(modelsummary) # pretty tables supporting stan_glm
+library(ggeffects)    # for plotting model effects
+library(ggiraphExtra) # more model effect plot functions
+library(metRology)    # to simulate student's t errors
+library(corrtable)    # pretty correlation matrices without the figure
+library(outliers)     # outlier detection tools
+library(DescTools)    # for winsorizing
+library(MASS)         # robust regression methods
+library(tidyverse)    # load last to avoid conflicts with other packages
+
+options(scipen = 999) # prevents scientific notation in the output
+
+```
+
+## Introduction
+
+In this document, we're going to explore outliers and influential observations in regression analysis. An outlier is an observation that falls far away from the rest of the data points. While all influential observations are outliers, not all outliers are influential. Understanding the difference between these types of observations and knowing how to diagnose and handle them is crucial for building robust regression models.
+
+[![Image by Ben Shabad](https://flowingdata.com/wp-content/uploads/2014/09/outlier.gif)](https://davidmlane.com/ben/cartoons.html)
+
+First, I'll walk you through what outliers are and why they matter. Then, we'll explore the different types of outliers using simulated data to see how they affect our regression models. Finally, I'll show you practical diagnostic tools for identifying problematic outliers in real data and discuss strategies for dealing with them.
+
+## Types of Outliers
+
+Outliers can be categorized into three main types based on their characteristics and impact on regression models:
+
+**Regular Outliers** are observations that fall far from the regression line in terms of the Y variable but are not unusual in terms of their X values. These points sit in the middle of the pack relative to X, so while they may have unusual Y values, they don't pull the regression line much because they lack leverage. Think of these as unexpected outcomes that deviate from what we'd predict, but they're not in a position to change our overall understanding of the relationship.
+
+**High Leverage Outliers** are unusual in terms of their X values. In the simple bivariate case, this is just an X value that is far outside the norm. In multivariate regression, a high leverage observation might be particularly high or low for one or more predictors, or it might represent an unusual combination of predictor values compared with other observations. Not all high leverage outliers are problematic—some may fall right along the regression line, just at an extreme position.
+
+**Influential Outliers** are the ones we really need to worry about. These are observations that have both unusual X values (high leverage) and pull the regression line away from where it would otherwise be. When we remove an influential outlier and re-estimate the model, we see a meaningful change in our regression coefficients. These are the outliers that can bias our estimates and lead us to incorrect conclusions.
+
+::: question
+That sounds like it could be bad. Why are some of these so much worse than others?
+:::
+
+Great question. Let's see if I can help you understand why the point that seems the most "out there" in your dataset might *not* be the one you need to worry about the most.
+
+## Visualizing Different Types of Outliers
+
+Let's use a simulation to see what these different types of outliers look like and how they affect our regression models. We'll start with a simple linear relationship: $y = 1 + 3x + e$, where $x$ comes from a uniform distribution between 0 and 5, and the error term $e$ is normally distributed with mean 0 and standard deviation 1.
+
+```{r sim1, fig.cap = "Plot of Simulated Data Without Outliers"}
+set.seed(123)
+
+n <- 100                        # we want 100 observations 
+x <- runif(n, 0, 5)             # x from a uniform distribution
+y <- 1 + 3*x + rnorm(n, 0, 1)   # calculate y with error 
+
+# plot the data
+plot(x, y, main = "Data Without Outliers")
+abline(lm(y~x), col = "blue", lwd = 2)
+
+```
+
+The plot shows the relationship we'd expect, given how we set up the simulation. Now let's create three additional versions of our data, each with a different type of outlier added.
+
+```{r simz, fig.show = 'hold', out.width="50%"}
+
+par(mar = c(4, 4, 2, .1))      # set up display space
+
+# Create the different types of outliers
+y.out <- c(y, 18)               # regular outlier (unusual Y)
+x.out <- c(x, 2.5)              # at a typical X value
+
+y.lev <- c(y, 25)               # high leverage outlier
+x.lev <- c(x, 8)                # at an extreme X value, but on the line
+
+y.inf <- c(y, 5)                # influential outlier
+x.inf <- c(x, 8)                # at an extreme X value, pulling the line
+
+# Plot all four scenarios
+plot(x, y, main = "No Outliers")
+abline(lm(y~x), col = "blue", lwd = 2)
+
+plot(x.out, y.out, main = "Regular Outlier")
+abline(lm(y.out ~ x.out), col = "blue", lwd = 2)
+points(2.5, 18, col = "red", pch = 19, cex = 2)
+
+plot(x.lev, y.lev, main = "High Leverage Outlier")
+abline(lm(y.lev ~ x.lev), col = "blue", lwd = 2)
+points(8, 25, col = "red", pch = 19, cex = 2)
+
+plot(x.inf, y.inf, main = "Influential Outlier")
+abline(lm(y.inf ~ x.inf), col = "blue", lwd = 2)
+points(8, 5, col = "red", pch = 19, cex = 2)
+
+```
+
+::: question
+This all looks neat. But what am I actually looking at?
+:::
+
+In the top-right plot, our regular outlier sits at the point (2.5, 18). Although this observation is far from the regression line on the Y axis, it's near the middle of the pack on the X axis. As you can see, the outlier isn't pulling at the regression line much, since it's in the middle of the pack relative to X. This represents an outcome that is far from what we would have predicted, but it doesn't have much influence over our estimated relationship.
+
+The bottom-left plot shows our high leverage outlier at (8, 25). This value is extreme on both X and Y, but it isn't pulling the regression line away from its path. In fact, this observation basically sits right on the regression line, just much farther out. While this observation has high leverage (it's in a position to influence the line), it doesn't actually exert that influence because it follows the same pattern as the rest of the data.
+
+The bottom-right plot shows our influential outlier at (8, 5). This is the problematic case. This observation has high leverage (extreme X value) and it pulls the regression line away from where it would otherwise be. If you compare this regression line to the one in the "No Outliers" plot, you can see that the slope has been reduced. This is the type of outlier that can bias our estimates and lead to incorrect inferences.
+
+::: question
+Why do we care so much about influential outliers but not the others?
+:::
+
+Great question! Regular outliers increase the variance of our estimates (making our standard errors larger and our tests less powerful), but they don't systematically bias our coefficients. High leverage observations that aren't influential actually help us—they extend the range of our X values, which can give us more precise estimates of the relationship. But influential outliers are problematic because they can pull our regression line in the wrong direction, leading to biased estimates of our coefficients. This means we might draw incorrect conclusions about the relationship between X and Y.
+
+::: question
+I think I understand, but perhaps an example would help?
+:::
+
+You've got it. Let's walk through an example of the different ways to diagnose and treat outliers in our data.
+
+## Dealing with Outliers
+
+Let's use the `mtcars` data from base R here. This is a dataset that contains information about various car models from the 1970s, including miles per gallon (mpg), horsepower (hp), weight (wt), and more. We'll start by looking at the descriptive statistics to see if there are any obvious outliers in our variables. But first I'm going to add in some additional cars to our data frame to make things a bit more interesting.
+
+```{r data, results = 'asis'}
+
+# load data
+data("mtcars")
+
+# add cars that are normal, high leverage, and influential outliers
+new_cars <- data.frame(
+  model = c("Herbie", "Kit", "Fillmore"),
+  mpg = c(10, 10, 30),   
+  cyl = c(6, 6, 6),     
+  disp = c(200, 200, 200), 
+  hp = c(100, 100, 100),    
+  drat = c(3.5, 3.5, 3.5), 
+  wt = c(2.5, 2.5, 8),     
+  qsec = c(16, 16, 16),    
+  vs = c(0, 0, 0),         
+  am = c(1, 1, 1),         
+  gear = c(4, 4, 4),       
+  carb = c(2, 2, 2)        
+)
+
+# add new cars 
+carz <- mtcars %>%
+  rownames_to_column(var = "model") %>%
+  bind_rows(new_cars) 
+
+# descriptives
+datasummary_skim(carz,
+                 type = "numeric") 
+
+```
+
+::: question
+I have no idea what I'm looking for here.
+:::
+
+Usually, we won't see evidence of problematic outliers in the descriptives. It's rarely that easy. But sometimes it actually *is* that easy. It's always a good idea to check the ranges of your variables in the descriptives to make sure they are sensible given what your variables should be measuring. For example, the variable `cyl` (number of cylinders) only takes on the values 3, 4, 6, and 8, which makes sense given what we know about cars (or maybe just those of us who grew up in Michigan know this). We would be surprised, then, if the maximum value in our table was something like 200. If we saw that, we might suspect that we've got a data entry error leading to a possible outlier.
+
+However, just because we don't see any extreme values in the summary statistics doesn't mean we don't have outliers that could be influential in our regression models. We need to dig a little deeper.
+
+### Univariate Approaches to Outlier Detection
+
+Sometimes it's useful to start by looking at individual variables to see if anything unusual is going on. Histograms can give us a quick visual sense of the distribution, but box plots are generally better for identifying outliers. As you know, the box plot shows the five-number summary; the box encompasses the middle 50% of the data, with a line at the median. Any observations beyond the whiskers appear as individual points. These are potential outliers. I'll make a little pipe here to show the boxplots in a single figure below.
+
+```{r box}
+
+# boxplots for each numeric variable
+
+carz %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = variable, y = value)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free") + # 'scales = "free"' allows each plot to have its own y-axis scale
+  labs(title = "Boxplots for all numeric variables", x = "Variable", y = "Value") +
+  theme_minimal()
+
+```
+
+We do see a few dots in this plot. This means that several of our variables might have individual points that are far from the mass of values for the variable. Of course, seeing these doesn't mean we've got a problem with outliers, just as seeing no individual points doesn't mean we're in the clear.
+
+::: question
+Why? Is it because problematic outliers are often bivariate or multivariate outliers?
+:::
+
+Exactly right! As we learned from our simulation, influential outliers are often bivariate in nature. An observation might not be unusual on any single variable, but the combination of its X and Y values (or its pattern across multiple X variables) might make it an outlier in the context of our regression model. This is why we need regression-based diagnostics. So let's push forward.
+
+### Studentized Residuals
+
+One of the most straightforward approaches to detecting outliers in regression is to examine the studentized residuals. A studentized residual is a residual that has been standardized by an estimate of its standard deviation. We typically look for observations with studentized residuals greater than 3 or less than -3 (i.e., more than three standard deviations from zero).
+
+Let's estimate a model:
+
+```{r ols}
+
+# estimate the model
+ols.fit <- lm(mpg ~ wt + hp + cyl, data = carz)
+modelsummary(ols.fit, stars = TRUE, gof_omit = "AIC|BIC|Log|Deviance")
+
+```
+
+Great. Now let's take a look at the studentized residuals.
+
+```{r studentized}
+
+# Get the studentized residuals
+res.std <- rstandard(ols.fit)
+
+# Plot them and add lines to identify extreme values
+plot(res.std, ylab = "Studentized Residual", 
+     main = "Studentized Residuals Plot")
+abline(h = c(-3, 0, 3), lty = 2, col = "red")
+
+# Identify potentially problematic observations
+index <- which(res.std > 3 | res.std < -3)
+print(index) # observations with possible problematic outliers
+
+```
+
+We don't see any observations here that fall outside the ±3 range, but there's a few that are probably pretty close to this. These are potential outliers that warrant further investigation. However, we need to remember that not all of these will be influential outliers—some might just be regular outliers with unusual Y values but typical X values.
+
+::: question
+Whew. So we don't need to be worried yet?
+:::
+
+No, we don't need to be worried yet. And, frankly, this isn't really something to get too stressed out about. We'll be able to deal with whatever comes to us. But first we need to better understand what we're facing.
+
+We can also use the `outlierTest()` function from the `car` package, which tests whether the largest studentized residual (in our plot above, it looks like this will be car number 35) is significantly different from the others using a Bonferroni correction:
+
+```{r bonferroni}
+
+car::outlierTest(ols.fit)
+
+```
+
+The Bonferroni correction adjusts the p-value to account for the fact that we're conducting multiple tests (one for each observation). This helps protect against false positives when testing many observations simultaneously. In this case, we fail to reject the null hypothesis that there are no outliers in the model, suggesting that while some observations have large residuals, they may not be statistically significant outliers once we account for multiple testing.
+
+::: question
+Okay, but doesn't this just tell us about observations with unusual $Y$ values? What about influential outliers that might have typical $Y$ values but unusual $X$ values?
+:::
+
+Exactly. This gives us a sense of the observations where our regression doesn't do a good job of predicting the Y value (i.e., the residual is large), but it doesn't tell us about observations that might be influential because of their X values. For that, we need to look at other diagnostics, like Cook's Distance.
+
+### Diagnostic Plots
+
+My starting point for evaluating my model for problematic outliers usually starts with the standard diagnostic plots. The standard diagnostic plots from base R can also help us identify influential outliers. The fourth plot (Residuals vs. Leverage) is particularly useful for this purpose:
+
+```{r diagnostic, out.width="100%", fig.cap = "Diagnostic Plots"}
+
+par(mfrow = c(2, 2))
+plot(ols.fit)
+
+```
+
+These plots are a good place to start when trying to get a sense of how are model fares vis-a-vis the OLS model assumptions. We can get a rough sense of the distribution of our error term, whether we've got patterns in our error term, etc. But the one we're most interested in for outlier detection is the Residuals vs. Leverage plot (bottom right). This plot shows us the relationship between the residuals and the leverage of each observation. Here, we're looking for observations in the upper or lower right corners, outside the dashed Cook's Distance contour lines. These would represent high-leverage points that also have large residuals—exactly the definition of influential outliers. In our case, we've got a few outliers here, one of which is in the Cook's Distance danger zone.
+
+::: question
+Wait. Who is Cook? What is his "distance"?
+:::
+
+I see what you're doing here. You're trying to get me off track. If you really need to know who Cook is, you can check out [his website](http://users.stat.umn.edu/~rdcook/) or his [Wikipedia page](https://en.wikipedia.org/wiki/R._Dennis_Cook) if you truly must know. But the important thing is that Cook's Distance is a measure of how much an observation influences our regression estimates. Unlike studentized residuals, which only tell us about observations with unusual Y values, Cook's Distance tells us about observations that actually influence our regression estimates.
+
+For each observation $i$, Cook's $D_i$ measures the effect of deleting that observation on the regression coefficients. It's calculated as:
+
+$$
+D_{i}={\frac {\sum _{j=1}^{n}\left({\widehat {y}}_{j}-{\widehat {y}}_{j(i)}\right)^{2}}{ks^{2}}}
+$$
+
+where $k$ is the number of variables in the model and $s^2$ is the mean squared error. A common rule of thumb is to investigate observations with $D_i > \frac{4}{n-k-1}$. Here, let's plot this along with the typical cut-off line (which is 4 divided by the number of observations minus the number of predictors minus 1). We'll put a red line at this cutoff to make it easier to see which observations exceed it.
+
+```{r cooks, fig.cap = "Cook's Distance"}
+
+# Calculate the cutoff
+cutoff <- 4/((nrow(carz) - length(ols.fit$coefficients) - 2))
+
+# Plot Cook's Distance
+plot(ols.fit, which = 4, cook.levels = cutoff)
+abline(h = cutoff, lty = 2, col = "red")
+
+```
+
+Oof. So it looks like we may have some issues here. Observations number 33, 34, and (especially) 35 look a bit suspect. The `car` package also provides a helpful influence plot that combines several diagnostics. Let's check that one out and see what it looks like.
+
+```{r influence}
+
+influencePlot(ols.fit, 
+              main = "Influence Plot",
+              sub = "Circle size proportional to Cook's Distance")
+
+```
+
+This plot shows studentized residuals on the y-axis and hat values (a measure of leverage) on the x-axis, with the size of each point proportional to Cook's Distance. This is similar to the last plot in our standard diagnostic plots, in that our most problematic observations will generally be in one of the corners on the right side of the plot. These are the ones with both high leverage and large residuals. The bubbles represent how influential each of the observations are (measured, of course, using Cook's D). We see here that most of the bubbles look to be white, but one of them is huge and blue. This is a sign that we've got a very high Cook's distance measure.
+
+::: question
+So now is it time to get worried?
+:::
+
+This seems bad, and it might be a little bad. Thankfully, we've got all sorts of different ways to deal with these issues. Let's explore some of them.
+
+## What To Do About Outliers
+
+Once you've identified outliers in your data, you have several options:
+
+1.  drop them
+
+2.  dummy them out
+
+3.  Windsorize them
+
+4.  use robust regression methods
+
+### Dropping Outliers
+
+The most straightforward way to deal with influential outliers is to just drop them from the analysis. This is a great way to deal with outliers that are the result of data entry errors or other mistakes.
+
+::: question
+This sounds easy. Why not just do this all the time?
+:::
+
+This sounds easy because it is. But it's not without its drawbacks. The decision to remove outliers should be driven by substantive considerations, not just statistical ones. Sometimes outliers represent important and real variation in your data. Removing them might make your model fit better statistically, but it could also mean you're ignoring important parts of the story your data are telling. The key is to understand where your outliers come from, investigate them carefully, and make decisions that are transparent and well-justified.
+
+Let's see what that looks like in our example:
+
+```{r drop}
+
+influential_obs <- 35
+carz_drop <- carz[-influential_obs, ]
+
+drop.fit <- lm(mpg ~ wt + hp + cyl, data = carz_drop)
+
+modz <- list(Original = ols.fit, 
+             Dropped = drop.fit)
+
+modelsummary(modz, 
+             stars = TRUE, gof_omit = "AIC|BIC|Log|Deviance")
+
+```
+
+So, dropping the influential observation has a pretty big impact on our coefficient estimates. The coefficient for `wt` changes from 0.641 (not significant) to -1.964 (almost significant). There are some additional changes to the model estimates, as well. The model seems to predict more of the variance in `mpg` than the original did. This is a good example of how influential outliers can bias our estimates and lead us to different conclusions about the relationships in our data.
+
+Does this clear up our outlier problem?
+
+```{r drop2}
+
+plot(drop.fit, which = 5)
+
+```
+
+::: question
+Yay! This looks much better. So we're done here, then?
+:::
+
+Not so fast. In our example, we *know* that the influential observation is a problem because we added it in ourselves. In real data, we won't have this luxury. We need to be careful about how we handle outliers, and we need to be transparent about our decisions. If we didn't already know that this outlier didn't represent something real about our data, we'd best look for an alternative option.
+
+### Dummying Outliers
+
+Another option is to create a dummy variable that indicates whether an observation is an outlier. This allows us to keep the outlier in the analysis while controlling for its influence. This can be a good option when we have reason to believe the outlier represents a real phenomenon that we want to account for in our model.[^1] Doing this creates a new intercept for the outlier observation. Sometimes this can work if you have more than one outlier, provided they all have something relevant in common with each other that makes them different from the others. As with dropping outliers, dummying our outliers out should also be done with some real thought about what those observations actually represent.
+
+[^1]: This is something that happened in a paper I published a while back. In that paper [@gill2011judicial], we were predicting evaluations of judges based on their performance and personal characteristics. One of our judges had been the subject of some truly gob-smacking scandals and was a pretty obviously unusual case. She also happened to be one of very few Latinas in our dataset, meaning that her extremely terrible behavior would contribute excessively to the overall parameter estimates for race and gender. Dummying her out was a pretty good option in that situation, since she was truly *sui generis*.
+
+To accomplish this, we'll just need to create a new dummy variable where our outlier is 1 and the other observations are 0. Then we can include this in our regression model to give us a new intercept for the outlier observation. This allows us to control for the influence of the outlier without removing it from the analysis.
+
+```{r dummy}
+
+carz <- carz %>%
+  mutate(outlier = ifelse(
+    row_number() == influential_obs, 1, 0))
+
+dummy.fit <- lm(mpg ~ wt + hp + cyl + outlier, data = carz)
+
+# add to list of models
+
+modz <- append(modz, list(Dummy = dummy.fit))
+
+modelsummary(modz, 
+             stars = TRUE, gof_omit = "AIC|BIC|Log|Deviance")
+```
+
+I've added our new model to the list of models in the table above. Notice anything interesting here? Now, it won't always be the case that the parameter estimates for the other variables will be the same as the original model, but in this case they are. By including the dummy variable, we were able to say something about our outlier case instead of just ignoring it. If this observation had been a real case in our data, this would have been a much better option than dropping it from the analysis. We were able to control for its influence without losing the information it contained.
+
+Let's check the plot to see how we did.
+
+```{r dummy2}
+
+plot(dummy.fit, which = 5)
+
+```
+
+::: question
+This seems like a good option. There must be a catch, right?
+:::
+
+Of *course* there's a catch! The catch is that this approach only works well when you have a small number of outliers that share something in common. If you have a large number of outliers, or if they don't share any common characteristics, then this approach can become unwieldy and may not be the best choice. Additionally, if the outlier is truly influential, it may still bias your estimates even with the dummy variable included. So while this can be a good option in some cases, it's not a one-size-fits-all solution. But we do have more options.
+
+### Winsorizing Outliers
+
+If we have values that are far outside the typical range in our data, we might want to consider truncating those values. This is exactly what Winsorizing is.
+
+::: question
+Wait, what is Winsorizing? Is that a real word?
+:::
+
+Yes. It's a real world named after a real person (who is not the King of England). The Winsorizing process was named for Charles Winsor, who has [a Wikipedia page](https://en.wikipedia.org/wiki/Charles_Winsor) (but not his own website for reasons you will figure out when you check Wikipedia). Winsorizing is a simple but clever technique where we replace extreme values with the value associated with a specified percentile of the data. For example, we might replace any value above the 95th percentile with the value at the 95th percentile. This can help reduce the influence of outliers while still keeping them in the analysis. However, this approach can also be somewhat arbitrary and may not always be appropriate, especially if the outliers represent real phenomena that we want to understand.
+
+Doing this by hand is a little fussy. Thankfully, we can accomplish this using the `descTools::Winsorize()` or the `psych::winsor()` function. Both allow us to specify the limits for Winsorizing our data. For example, if we want to Winsorize our `wt` variable at the 5th and 95th percentiles, we can do it like this:
+
+```{r winsorize}
+
+carz <- carz %>%
+  mutate(wt_w = psych::winsor(wt, trim = 0.05))
+
+winsor.fit <- lm(mpg ~ wt_w + hp + cyl, data = carz)
+
+modz <- append(modz, list(Winsorized = winsor.fit))
+
+modelsummary(modz, 
+             stars = TRUE, 
+             gof_omit = "AIC|BIC|Log|Deviance")
+
+```
+
+So this one looks quite different from the others. The goodness-of-fit statistics are closest to our original model. The parameter estimate for the `wt_w` variable is quite a bit different from what it is in the other models. This is because the Winsorizing process has reduced the influence of the outlier on our estimates. The parameter estimates for `hp` and `cyl` are also different from the original model, but they are more similar to the original than they are in the other models. This is because we haven't completely tossed the outlier from the estimation of the rest of the parameter estimates; we've only dampened its influence on them.
+
+::: question
+This seems like a pretty good option. Why not just do this all the time?
+:::
+
+This can be a good option in some cases, but it's not without its drawbacks. The main issue with Winsorizing is that it can be somewhat arbitrary. The choice of which percentiles to use for Winsorizing can have a big impact on your results, and there's no one-size-fits-all answer for which percentiles to use. Additionally, if the outliers represent real phenomena that we want to understand, then Winsorizing might not be the best choice because it can obscure important information in the data.
+
+### Robust Regression Methods
+
+Finally, if we have a lot of outliers or if we want to be more systematic about dealing with them, we might consider using robust regression methods. These methods are designed to be less sensitive to outliers than ordinary least squares regression. One common approach is to use M-estimators, which downweight the influence of outliers in the estimation process.
+
+::: question
+How is this different from Winsorizing?
+:::
+
+You're right that the logic is similar in that both approaches aim to reduce the influence of outliers on our estimates. However, robust regression methods do this in a more systematic way by adjusting the estimation process itself, rather than just modifying the data. Robust regression methods can be more flexible and can provide better estimates in the presence of outliers, especially when there are many outliers or when the outliers are not easily identifiable. Basically, it uses an iterative process to create a weighted regression where the weights are determined by the residuals. Observations with large residuals (potential outliers) receive smaller weights, which reduces their influence on the parameter estimates. This allows us to get more reliable estimates even when our data contains outliers.
+
+The `MASS` package provides a convenient function called `rlm()` for fitting robust linear models using M-estimators. Here's how we can use it:
+
+```{r robust}
+
+robust.fit <- MASS::rlm(mpg ~ wt + hp + cyl, data = carz)
+
+modz <- append(modz, list(Robust = robust.fit))
+
+modelsummary(modz, 
+             stars = TRUE, 
+             gof_omit = "AIC|BIC|Log|Deviance")
+
+```
+
+::: question
+Where did the $R^2$ go? Why is it not in the table?
+:::
+
+Good catch! The `rlm()` function from the `MASS` package does not provide an $R^2$ value because it's not based on the same assumptions as ordinary least squares regression. Robust regression methods focus on providing reliable parameter estimates in the presence of outliers, but they don't necessarily fit the data in the same way as OLS, which is why traditional goodness-of-fit measures like $R^2$ aren't applicable. Instead, we can look at other diagnostics and measures of fit that are more appropriate for robust regression models to evaluate how well our model is performing. For a deeper discussion of this method, see Chapter 19 in @fox2016applied.
+
+Let's see what the diagnostic plot looks like:
+
+```{r robust2}
+
+plot(robust.fit, which = 5)
+
+```
+
+Again, we see that the observation is still high leverage, but the residual is much smaller than it was in the OLS model. This is because the robust regression method has downweighted the influence of this observation, which has allowed us to get more reliable estimates even in the presence of this outlier. This means that, like the other fixes we've tried, it has made the outlier less influential.
+
+## Conclusion
+
+::: question
+I'm so confused. Why don't you just tell me which one is best?
+:::
+
+I know. I'm sorry. But there really isn't a single best method for dealing with influential outliers. The best approach depends on the context of your analysis, the nature of your data, and the specific research questions you're trying to answer. Each method has its own advantages and disadvantages, and the choice of which one to use should be guided by substantive considerations about what the outliers represent in your data.
+
+There are, however, a few tips that might help you make this decision.
+
+-   If the outliers are the result of data entry errors or other mistakes, then dropping them from the analysis is often the best option.
+-   If you have a small number of outliers that represent a real phenomenon that we want to understand, then dummying them out allows you to capture something about how these cases differ from the others, perhaps even making your theory more nuanced.
+-   If you have more than just a few observations that are outliers on a specific variable (that don't have an obvious, theoretically relevant characteristic in common), then Winsorizing can be a good option.
+-   If you have a lot of outliers across a number of different combinations of variables and/or if you want to be more systematic about dealing with them, then robust regression methods can provide more reliable estimates in the presence of outliers.
+
+Outliers are a fact of life in real-world data analysis. Not all outliers are problematic—regular outliers and even some high-leverage points can be perfectly fine to include in your models. The outliers we need to worry about are influential observations that bias our coefficient estimates.
+
+The diagnostic tools we've covered—--studentized residuals, Cook's Distance, and diagnostic plots—--give us multiple ways to identify potentially problematic observations. But identification is just the first step. The real work lies in understanding where these outliers come from and making thoughtful decisions about how to handle them in your analysis.
+
+------------------------------------------------------------------------
+
+## References
