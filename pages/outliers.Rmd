@@ -278,7 +278,7 @@ Great. Now let's take a look at the studentized residuals.
 ```{r studentized}
 
 # Get the studentized residuals
-res.std <- rstandard(ols.fit)
+res.std <- rstudent(ols.fit)
 
 # Plot them and add lines to identify extreme values
 plot(res.std, ylab = "Studentized Residual", 
