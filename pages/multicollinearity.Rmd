@@ -87,6 +87,7 @@ library(psych)        # factor analysis tools
 library(plotly)       # for cool interactive 3D plots 
 library(eulerr)       # for Venn diagrams
 library(gridExtra)    # for arranging multiple plots in a grid
+library(rstanarm)     # for Bayesian regression models
 library(broom)
 library(tidyverse)    # load last to avoid conflicts with other packages
 
@@ -737,6 +738,154 @@ htmlreg(list(ols.fit, pcf2.mod, comp.mod), single.row = FALSE)
 ```
 
 Here, I've included the original OLS model as model 1, our model replacing the three collinear variables with the first PCA factor as model two, and the same model swapping the index measure for the PCA factor. This is also what I recommend when you're making an index of multiple different measures to use as a dependent variable. Again, the simpler version is preferable because it retains interpretability on account of its scale. It shows that a one-unit increase from the mean of our index variable is associated with a `r round(comp.mod$coefficients[2], 3)` unit change in miles per gallon. However, it's important to make sure that the index variable you create is highly correlated with the factor scores from a PCF, since this is a "gut check" that it makes sense to summarize the variables the way you do. An alternative to this is to conduct what's called an alpha analysis (or Cronbach's Alpha). This gives us a sense of the consistency of the measure. There's a really good summary of exploratory factor analysis and Cronbach's Alpha here: <https://rpubs.com/pjmurphy/758265> .
+
+## MLE and Bayesian Estimation
+
+A lot of practitioners get the impression that only OLS models need diagnostics. Because models estimated with maximum likelihood (MLE) or Bayesian estimation (BE) don't have residuals akin to those generated through the OLS estimation process, people tend to think that multicollinearity isn't an issue. But this isn't quite right. Let's start with MLE.
+
+### In MLE
+
+In a Gaussian linear model estimated using MLE, the likelihood is
+
+$$
+\ell(\beta, \sigma^2) = -\frac{n}{2} \log(2\pi\sigma^2) - \frac{1}{2\sigma^2} (y - X\beta)^T (y - X\beta)
+$$
+
+Maximizing this with respect to $\beta$ yields the same normal equations as OLS: $\hat{\beta}_{MLE} = (X^T X)^{-1} X^T y$. So the MLE point estimates are *algebraically identical* to OLS estimates. Whatever multicollinearity does to OLS (e.g., inflated standard errors, numerically unstable coefficient estimates, a nearly singular $(X^TX)$ matrix) it does to MLE for exactly the same reason. The likelihood surface becomes a flat ridge rather than a clean bowl. Many combinations of correlated predictors yield nearly identical likelihood values, so the estimator struggles to localize a unique maximum.
+
+::: question
+Ugh. Does this mean I need to learn a whole bunch more functions to diagnose multicollinearity in MLE models?
+:::
+
+Not at all. The same tools we use to diagnose multicollinearity in OLS models (e.g., VIFs) can be applied to the design matrix of MLE models as well. The key is to remember that the problem of multicollinearity is fundamentally about the relationships among the predictor variables, and this issue is present regardless of the estimation method used. So, you can still use VIFs or other diagnostics to assess multicollinearity in MLE models just as you would in OLS models. Let's try this here with the model we used above:
+
+```{r}
+
+# fit a Gaussian linear model using MLE
+mle.fit <- glm(mpg ~ disp + hp + wt + qsec, 
+               data = mtcars,
+               family = gaussian())
+
+# calculate VIFs for the MLE model
+kable(vif(mle.fit)) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+::: question
+Wait. This looks very familiar.
+:::
+
+Good. It should look familiar because this table is the same as what it was for our OLS model. This is because the design matrix is the same for both models, so the relationships among the predictor variables are the same. Therefore, the VIFs are the same, and we can diagnose multicollinearity in MLE models using the same tools we use for OLS models. This means that, just as in our OLS model, we have some borderline problematic multicollinearity in our MLE model. Believe it or now, we can apply the *same strategies* for dealing with it (e.g., dropping variables, creating an index variable, etc.).
+
+::: question
+This seems too easy. I'll bet it's way more of a pain for Bayesian models, right?
+:::
+
+Well, sort of. Let's get into it.
+
+### In BE
+
+By this stage, you might suspect that Bayesian models are also affected by multicollinearity. And you'd be right. In a Bayesian model, the posterior is proportional to the likelihood times the prior ($P(\theta|D) \propto P(D|\theta)P(\theta)$). With weakly informative priors (the `stan_glm()` default), the posterior is dominated by the likelihood, so it inherits the same ridge-shaped geometry. If you have high essential multicollinearity in your model, you get a posterior distribution that is very wide and highly correlated across the affected coefficients. The model is genuinely uncertain about how to partition the effects on $P(\theta|D)$ between collinear predictors. This can make your coefficient estimates are unreliable for interpretation.
+
+To diagnose this, one option is to do *exactly the same thing* we do for OLS models.
+
+```{r, include = FALSE}
+# hide the messy output
+
+
+# fit a Bayesian linear model
+bayes.fit <- stan_glm(mpg ~ disp + hp + wt + qsec,
+                     data = mtcars,
+                     family = gaussian(),
+                     prior = NULL) # use weakly informative priors
+```
+
+```{r}
+
+# calculate VIFs for the Bayesian model
+kable(vif(bayes.fit)) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+::: question
+You're kidding! It's this easy?!
+:::
+
+It's this easy, sort of. The VIFs are the same as for the OLS and MLE models, which makes sense because the design matrix is the same. This means that we can diagnose multicollinearity in Bayesian models using the same tools we use for OLS and MLE models. But we might also want to imspect the posterior correlation matrix of coefficients. This is a feature of Bayesian models that has no real equivalent for OLS or MLE models. If we see high correlations among the posterior distributions of the affected coefficients, this is a sign that we have problematic multicollinearity in our Bayesian model. Let's try it.
+
+```{r}
+
+# get posterior correlation matrix of coefficients
+post.cor <- cor(as.matrix(bayes.fit)[, 2:4]) # excludes intercept 
+
+kable(round(post.cor, 2)) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+We can see that we've got some relatively large correlations among the posterior distributions of the affected coefficients, which is a sign that we have problematic multicollinearity in our Bayesian model. This means that we need to take steps to address this issue before we can reliably interpret our coefficient estimates.
+
+::: question
+So, do we just do the same things as we did for OLS and MLE?
+:::
+
+You're on the right track here. The options we had for our OLS and MLE models are still available for us here. However, we have an additional option in BE models. It has to do with our priors. Remember that our priors are intended to represent our beliefs about the parameters before we see the data. If we have high multicollinearity, our data is not going to be very informative about how to partition the effects among the collinear predictors. This means that our posterior distribution is going to be very wide and highly correlated across the affected coefficients. By applying a stronger prior, we can help to stabilize the estimates and reduce the uncertainty in the posterior distribution. This can help to mitigate the effects of multicollinearity and make our coefficient estimates more reliable for interpretation.
+
+Let's try this out by applying a *shrinkage prior*. This will regularize coefficient magnitudes without forcing sparsity (i.e., setting coefficients to zero). This is a good option when we have high multicollinearity but we don't want to drop any of the collinear predictors from the model. By applying a shrinkage prior, we can help to stabilize the estimates and reduce the uncertainty in the posterior distribution, which can make our coefficient estimates more reliable for interpretation. In this instance, let's use a normal prior with a mean of zero and a standard deviation of 1. This is a relatively strong prior that will shrink the coefficients towards zero, which can help to mitigate the effects of multicollinearity. Then we can compare the posterior correlation matrices to see if this has helped to reduce the correlations among the affected coefficients.
+
+```{r, include = FALSE}
+
+# fit a Bayesian linear model with a shrinkage prior
+bayes.norm <- stan_glm(mpg ~ disp + hp + wt + qsec,
+                     data = mtcars,
+                     family = gaussian(),
+                     prior = normal(
+                       location = 0, 
+                       scale = 1,
+                       autoscale = TRUE),
+                     prior_intercept = normal(
+                       location = 0,
+                       scale = 10,
+                       autoscale = TRUE)
+                     ) 
+
+```
+
+First, let's check to see the prior we applied after autoscaling.
+
+```{r}
+
+prior_summary(bayes.norm)
+
+```
+
+Now, let's check out our correlation matrix for the posterior distributions of the affected coefficients to see if this has helped to reduce the correlations among them.
+
+```{r}
+
+post.norm <- cor(as.matrix(bayes.norm)[, 2:4]) # excludes intercept
+
+kable(round(post.norm, 2)) %>%
+  kable_styling(full_width = FALSE)
+
+
+```
+
+::: question
+It looks like it did *something*, but the correlations are still pretty high. What gives?
+:::
+
+You're right. It helped a little, but we'd probably need to dial this in a bit more. This would involve trying a range of scale values to see how sensitive the posteriors are; high sensitivity means that the prior is doing a lot of the work in the estimation process. However, since this isn't really a class about Bayesian modeling, I'm not going to go into too much detail on this here. The key takeaway is that applying a stronger prior can help to mitigate the effects of multicollinearity in Bayesian models, but it's important to diagnose multicollinearity first before applying a prior. This is because the choice of prior can have a significant impact on the results of the model, and applying a prior without diagnosing multicollinearity first is a hidden modeling decision that you're making blindly. By diagnosing multicollinearity first, you can make an informed decision about how to set the parameters of your prior to best address the issue at hand.
+
+::: question
+What if I didn't understand anything in your discussion of multicollinearity in Bayesian models? Asking for a friend...
+:::
+
+Honestly, don't worry about this. The key takeaway is that multicollinearity is a problem in Bayesian models just as it is in OLS and MLE models, and we can diagnose it using the same tools (e.g., VIFs). However, we also have the option to inspect the posterior correlation matrix of coefficients to get a sense of how much multicollinearity is affecting our model. If we see high correlations among the posterior distributions of the affected coefficients, this is a sign that we have problematic multicollinearity in our Bayesian model. In terms of addressing this issue, we can apply a stronger prior to help stabilize the estimates and reduce the uncertainty in the posterior distribution, which can help to mitigate the effects of multicollinearity and make our coefficient estimates more reliable for interpretation.
+
+If you're really interested in this topic, perhaps a course in Bayesian modeling would be a good next step for you. But for now, just know that multicollinearity is a problem in Bayesian models, and we can diagnose it using the same tools we use for OLS and MLE models. We also have the option to apply a stronger prior to help mitigate the effects of multicollinearity in our Bayesian models.
 
 ------------------------------------------------------------------------
 
