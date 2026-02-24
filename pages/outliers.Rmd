@@ -84,6 +84,8 @@ library(metRology)    # to simulate student's t errors
 library(corrtable)    # pretty correlation matrices without the figure
 library(outliers)     # outlier detection tools
 library(DescTools)    # for winsorizing
+library(rstanarm)     # for bayesian models
+library(loo)          # to implement leave-one-out cross-validation
 library(MASS)         # robust regression methods
 library(tidyverse)    # load last to avoid conflicts with other packages
 
@@ -188,7 +190,7 @@ I think I understand, but perhaps an example would help?
 
 You've got it. Let's walk through an example of the different ways to diagnose and treat outliers in our data.
 
-## Dealing with Outliers
+## Our Example
 
 Let's use the `mtcars` data from base R here. This is a dataset that contains information about various car models from the 1970s, including miles per gallon (mpg), horsepower (hp), weight (wt), and more. We'll start by looking at the descriptive statistics to see if there are any obvious outliers in our variables. But first I'm going to add in some additional cars to our data frame to make things a bit more interesting.
 
@@ -541,8 +543,6 @@ plot(robust.fit, which = 5)
 
 Again, we see that the observation is still high leverage, but the residual is much smaller than it was in the OLS model. This is because the robust regression method has downweighted the influence of this observation, which has allowed us to get more reliable estimates even in the presence of this outlier. This means that, like the other fixes we've tried, it has made the outlier less influential.
 
-## Conclusion
-
 ::: question
 I'm so confused. Why don't you just tell me which one is best?
 :::
@@ -559,6 +559,118 @@ There are, however, a few tips that might help you make this decision.
 Outliers are a fact of life in real-world data analysis. Not all outliers are problematic—regular outliers and even some high-leverage points can be perfectly fine to include in your models. The outliers we need to worry about are influential observations that bias our coefficient estimates.
 
 The diagnostic tools we've covered—--studentized residuals, Cook's Distance, and diagnostic plots—--give us multiple ways to identify potentially problematic observations. But identification is just the first step. The real work lies in understanding where these outliers come from and making thoughtful decisions about how to handle them in your analysis.
+
+## In MLE and Bayesian Estimation
+
+Many folks think that outliers are only a problem for OLS regression, but that's not the case. Outliers can also be problematic in maximum likelihood estimation (MLE) and Bayesian estimation.
+
+::: question
+Oh, no. Not this again!
+:::
+
+I know. But I promise to keep things as simple as I can. Let's take this one step at a time. We'll start with MLE.
+
+### In MLE
+
+MLE with a Gaussian likelihood minimizes the same squared deviations as OLS — because the Gaussian log-likelihood is a quadratic function of the residuals. So influential outliers distort the MLE estimates for exactly the same reason they distort OLS: the squared loss function penalizes large deviations heavily, and a single extreme observation can pull the estimated surface disproportionately. There is no robustness "for free" just because you wrote down a likelihood.
+
+As with OLS, the key distinction is between outliers (unusual in Y-space) and high-leverage points (unusual in X-space). Both are dangerous; high-leverage points are often more insidious because they don't necessarily produce large residuals. In MLE, outliers can lead to biased parameter estimates and can affect the convergence of the optimization algorithm.
+
+::: question
+So can we just use the same diagnostics as OLS?
+:::
+
+Sort of. Let's start by looking at the tools that work with `glm` objects. First, let's look at the basic diagnostic plots for our MLE model:
+
+```{r}
+
+# estimate model using MLE
+mle.fit <- glm(mpg ~ wt + hp + cyl, 
+               data = carz,
+               family = gaussian(link = "identity")
+)
+
+plot(mle.fit, which = 5)
+
+```
+
+It might come as a surprise to learn that the same diagnostic plots we use for OLS can be used for MLE models as well. The logic is the same: we're looking for observations with large residuals and high leverage. The interpretation of these plots is also the same as in OLS.
+
+::: question
+Wait. I thought that MLE doesn't have residuals! How is this even working?
+:::
+
+This is a very clever insight. First, it's important to realize that, while MLE doesn't obsess over residuals the way OLS does, these models *do* have residuals. It's just that these models don't have assumptions about the distribution of these residuals (as OLS does). In a Gaussian MLE model, the residuals are just the differences between the observed values and the predicted values from the model. The diagnostic plots for MLE models are based on these residuals, so we can still use them to identify potential outliers and influential observations.
+
+What MLE estimation removes is the theoretical guarantee derived from Gauss-Markov that gives OLS residuals their specific distributional properties. But the residuals (i.e., the raw differences between observed and predicted values, or $\hat{y}_i-y_i$) still exist, and they can still be used to identify outliers. The diagnostic plots for MLE models are based on these residuals, so we can still use them to identify potential outliers and influential observations.
+
+If follows from this that we can also calculate Cook's Distance for our MLE model to identify influential observations. None of these diagnostics is really about the error term per se; instead, they're about the geometry of the design matrix. In other words, it's about how much each individual observation is pulling the estimated coefficients toward itself. Cook's distance measures how much the coefficient vector $\hat{\beta}$ shifts when you delete observation $i$ and refit. That's a question about estimation stability, not about distributional assumptions. It will reveal influential points regardless of whether you estimated by OLS, MLE, or anything else that produces a $\hat{\beta}$.
+
+::: question
+So these diagnostics are asking questions about the data's relationship to the model, not about the model's assumptions about the data?
+:::
+
+When we're talking about MLE, that's exactly right. And the linear model is a special case of MLE that has even more similarities with OLS compared to the models we'll learn about in PSC 703. In this special case, the MLE solution is algebraically identical to OLS. The likelihood surface is quadratic in $\beta$, and maximizing it produces *exactly* the normal equations we use to calculate OLS coefficients. In other words, the MLE residuals aren't just analogous to OLS residuals; they *are* OLS residuals.
+
+::: question
+Woah. So does that mean that the same strategies for finding and dealing with outliers in OLS will work for MLE as well?
+:::
+
+Yes. Mostly. Studentized residuals can be calculated for MLE models, but they aren't really analogous to the studentized residuals we get from OLS because they don't have the same distributional properties. However, our most helpful tool (Cook's Distance) can be calculated for MLE models and can be used to identify influential observations. The diagnostic plots for MLE models are based on the residuals, so we can still use them to identify potential outliers and influential observations, as we saw in the diagnostic plot above.
+
+However, there is a way to use the other tools (like `car::influencePlot()` and studentized residuals) with MLE models as well. The simplest way is to just estimate your model using `lm()` instead.
+
+::: question
+Wait. What? You're kidding. All of this babbling on and on just to tell me that I should just diagnose an OLS version of the model after all?
+:::
+
+Yeah. But the adjustments you make to your model to deal with outliers will still be relevant for your MLE model. The diagnostics are really about the geometry of the design matrix and the influence of individual observations on the estimated coefficients, rather than about the specific estimation method. So, by diagnosing an OLS version of your model, you can identify influential observations and then apply the appropriate adjustments (like dropping, dummying, Winsorizing, or using robust regression methods) to your MLE model as well. To avoid breaking your brain, we'll skip the discussion of estimating robust MLE models. But the strategies of dropping, dummying, and Winsorizing can all be applied to MLE models just as they can be applied to OLS models.
+
+### In BE
+
+In Bayesian estimation, outliers can influence the posterior distribution and lead to biased estimates as well. The same diagnostic tools we use for OLS can be adapted for use in MLE and Bayesian contexts, and similar strategies for dealing with outliers can be applied.
+
+::: question
+You're not going to tell me to just estimate an OLS version and diagnose *that*, are you?
+:::
+
+Mostly, yes. That's exactly what I'm going to do. The same logic applies here as it does in MLE. The diagnostic tools for identifying influential observations are based on the geometry of the design matrix and the influence of individual observations on the estimated coefficients, rather than on the specific estimation method. So, by diagnosing an OLS version of your model, you can identify influential observations and then apply the appropriate adjustments to your Bayesian model as well.
+
+There is one cool thing about BE models that can really demonstrate the influence of outliers. Let's walk through our example and see.
+
+```{r, include = FALSE}
+
+# estimate model using stan_glm
+bayes.fit <- stan_glm(mpg ~ wt + hp + cyl, 
+                 data = carz,
+                 family = gaussian(link = "identity")
+                 )
+
+
+```
+
+After fitting our model, we can use `loo::loo()` to perform leave-one-out cross-validation and identify influential observations based on their contribution to the expected log predictive density (ELPD). Observations with large negative contributions to ELPD are potential outliers that are influencing our model's predictions. When you do approximate LOO with PSIS (Pareto-smoothed importance sampling, which is what `loo::loo()` does), each observation gets a Pareto shape parameter $k$. When $k > 0.7$, the approximation breaks down because that observation is so influential that the posterior shifts dramatically without it. This is a principled Bayesian way to flag the same observations Cook's D would flag, and it emerges naturally from the Bayesian workflow rather than being bolted on afterward.
+
+Let's give it a try:
+
+```{r}
+
+loo.fit <- loo(bayes.fit)
+plot(loo.fit)
+
+```
+
+::: question
+What am I looking at?
+:::
+
+Good question. This plot shows, for each observation, what happens to the posterior distribution when you remove that observation. Observations with $k > 0.7$ are flagged as influential. In our case, we see that observation number 35 has a $k$ value greater than 0.7, indicating that it is an influential observation that is affecting our model's predictions. This is consistent with what we found using Cook's Distance in our OLS diagnostics, which gives us confidence that this observation is indeed influential and warrants further investigation.
+
+::: question
+Aah. I see. So what do I actually *do* about the outliers?
+:::
+
+As with MLE, most of the options for dealing with outliers work just as well with BE. Again, the exception here is robust regression methods, which are a bit more complicated to implement in a Bayesian context. However, the strategies of dropping, dummying, and Winsorizing can all be applied to Bayesian models just as they can be applied to OLS and MLE models. The key is to understand where your outliers come from and make thoughtful decisions about how to handle them in your analysis, regardless of the estimation method you're using.
 
 ------------------------------------------------------------------------
 
