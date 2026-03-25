@@ -1,0 +1,758 @@
+---
+title: "Diagnostics"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
+output:
+  bookdown::html_document2:
+    number_sections: FALSE
+    toc: false
+    code_folding: hide
+    self_contained: true
+    base_format: rmarkdown::html_document
+bibliography: hw.bib
+csl: gill_apsr.csl
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{css, echo = FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+/* This code defines the highlighted "mark" tag */
+
+mark {
+  background-color: LemonChiffon;
+  color: black;
+}
+
+/* This code makes the tables a little nicer. */
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width:80%;
+  white-space:nowrap;
+}
+
+```
+
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      cache = FALSE,
+                      fig.align = "center")
+
+options(scipen = 999)
+
+```
+
+```{r}
+#| label: libs
+
+P <- c("knitr",
+       "kableExtra",   # prettier kable tables
+       "tidyverse",    # ggplot2, dplyr, etc.
+       "GGally",       # ggpairs() for bivariate matrix
+       "stargazer",    # descriptive statistics tables
+       "texreg",       # htmlreg() for regression tables
+       "modelsummary", # compare_performance(), datasummary_skim()
+       "performance",  # compare_performance()
+       "ggeffects",    # ggpredict() for effects plots
+       "patchwork",    # side-by-side ggplots
+       "car",          # vif(), outlierTest(), crPlots(), influencePlot()
+       "lmtest",       # resettest(), bptest()
+       "sandwich",     # vcovHC() for HC-robust SEs
+       "olsrr",        # ols_plot_dfbetas()
+       "MASS",         # rlm() for robust regression
+       "splines"       # ns() for natural cubic splines
+       )
+
+for (pkg in P) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, repos = "http://cran.us.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+rm(P, pkg)  # clean up the mess
+
+```
+
+------------------------------------------------------------------------
+
+## Introduction
+
+Every time you estimate an OLS regression model, you're making a set of assumptions. The assumptions aren't just bureaucratic fine print — when they're violated, your coefficient estimates can be biased, your standard errors can be wrong, and your inferences can lead you astray. The goal of diagnostics is to find out *which* assumptions are violated, *how badly*, and *what to do about it*.
+
+The problem is that the diagnostic steps can feel like a jumbled bag of tests and plots with no obvious logic connecting them. This document is my attempt to give you a clear, principled workflow — a sequence you can follow every single time you estimate an OLS model, with a rationale for *why* each step comes where it does.
+
+Here's the key logic:
+
+> Some diagnostic problems contaminate others. Run diagnostics in the order that lets each step work on the cleanest possible version of your model.
+
+This is why order matters. Unmodeled nonlinearity creates artificial outliers. Artificial outliers distort heteroscedasticity tests. Multicollinearity inflates standard errors in ways that look like estimation problems. Fix things in sequence, and the later diagnostics become more interpretable. Jump around, and you'll be chasing ghosts.
+
+------------------------------------------------------------------------
+
+## The Workflow at a Glance
+
+Here's the full sequence we'll follow. Keep this table in mind as a roadmap; each step is covered in detail in the sections that follow.
+
+```{r}
+#| label: roadmap
+#| echo: false
+#| results: 'asis'
+
+roadmap <- data.frame(
+  Step = 1:9,
+  Stage = c(
+    "Data Exploration",
+    "Model Estimation",
+    "Multicollinearity",
+    "Nonlinearity",
+    "Outliers & Influence",
+    "Residual Normality",
+    "Heteroscedasticity",
+    "Model Selection",
+    "Presentation"
+  ),
+  Key_Tools = c(
+    "stargazer(), ggpairs(), t.test()",
+    "lm(), htmlreg()",
+    "vif(), pairs.panels()",
+    "resettest(), crPlots(), poly(), ns()",
+    "outlierTest(), cooks.distance(), influencePlot(), ols_plot_dfbetas()",
+    "shapiro.test(), qqPlot()",
+    "bptest(), ncvTest(), vcovHC(), rlm(), lm(log(y))",
+    "anova(), compare_performance(), AIC/BIC",
+    "htmlreg(), stargazer(), ggpredict()"
+  ),
+  Why_Here = c(
+    "You must know your data before you can diagnose your model",
+    "You need a fitted model before you can examine its residuals",
+    "Collinearity is a design-matrix problem; diagnose it before residual checks",
+    "Misspecified functional form creates phantom outliers and fake heteroscedasticity",
+    "With correct functional form, outliers are now real; diagnose and treat",
+    "Non-normality is often downstream of nonlinearity and outliers; check after fixing those",
+    "Heteroscedasticity tests are most reliable once functional form is correct",
+    "Compare baseline to corrected specifications using fit statistics",
+    "Display your final, best-specified model with clean tables and effects plots"
+  )
+)
+
+kable(roadmap,
+      col.names = c("Step", "Stage", "Key Tools", "Why Here"),
+      caption = "The OLS Diagnostic Workflow") %>%
+  kable_styling(full_width = TRUE, font_size = 13) %>%
+  column_spec(1, bold = TRUE, width = "3em") %>%
+  column_spec(2, width = "12em") %>%
+  column_spec(3, width = "22em") %>%
+  column_spec(4, width = "30em")
+
+```
+
+Now let's work through each step with a concrete example.
+
+------------------------------------------------------------------------
+
+## The Data Generating Process
+
+To make every diagnostic step interesting, I've built a dataset where *everything* is a little wrong. Here's the true model:
+
+$$y = 2 + 1.5x_1 + 3x_2 - 2x_2^2 + 0.8x_3 + \varepsilon_i$$
+
+where:
+
+-   $x_1 \sim U(0, 10)$
+-   $x_2 \sim N(0, 1)$ — included in a *quadratic* relationship with $y$, which we'll pretend not to know
+-   $x_3 = 0.7 \cdot x_1 + \eta$, $\eta \sim N(0, 1)$ — *correlated* with $x_1$, producing essential multicollinearity
+-   $\varepsilon_i \sim N(0, \sigma_i^2)$ where $\sigma_i = \exp(0.35 \cdot x_1)$ — *heteroscedastic* errors that fan out with $x_1$
+-   Three observations have been hand-placed as influential outliers
+
+The model we'll actually fit (pretending we don't know the true DGP) is the misspecified version: $y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_3 + \varepsilon$. This gives us real problems to find and fix.
+
+```{r}
+#| label: dgp
+
+set.seed(1975)
+
+n   <- 300
+x_1 <- runif(n, 0, 10)                         # uniform predictor
+x_3 <- 0.7 * x_1 + rnorm(n, 0, 1)              # correlated with x_1 (multicollinearity)
+x_2 <- rnorm(n, 0, 1)                          # nonlinear predictor
+e   <- rnorm(n, 0, exp(0.35 * x_1))            # heteroscedastic errors
+
+y   <- 2 + 1.5 * x_1 + 3 * x_2 - 2 * x_2^2 + 0.8 * x_3 + e
+
+# build the data frame
+sim.df <- data.frame(y, x_1, x_2, x_3)
+
+# plant three influential outliers
+sim.df[301, ] <- c(90, 9.5, 0.0, 8.0)   # high leverage, pulls line up
+sim.df[302, ] <- c(-40, 8.5, 0.2, 7.5)  # high leverage, pulls line down
+sim.df[303, ] <- c(200, 5.0, 0.1, 4.5)  # extreme Y outlier, high influence
+
+n <- nrow(sim.df)  # update n to include planted outliers
+
+```
+
+------------------------------------------------------------------------
+
+## Step 1: Data Exploration
+
+Before you touch `lm()`, look at your data. This isn't just due diligence — it's where you form hypotheses about what might go wrong. The questions to ask are: What are the distributions of each variable? Are there obvious outliers in the raw data? What are the bivariate relationships between predictors, and between each predictor and the outcome?
+
+```{r}
+#| label: desc
+#| results: 'asis'
+
+stargazer(sim.df,
+          title  = "Descriptive Statistics",
+          type   = "html",
+          format = "apsr",
+          digits = 2)
+
+```
+
+Notice the range of `y` — the max is suspiciously large (200). This is a flag worth keeping in mind.
+
+For continuous predictors, a scatter matrix showing bivariate relationships is worth its weight in gold. It lets you see both the correlation structure among your predictors *and* hints at nonlinearity in the predictor-outcome relationships.
+
+```{r}
+#| label: pairs
+#| fig.cap: "Scatter matrix with Pearson correlations (upper triangle), bivariate smoothers (lower triangle), and density plots (diagonal)."
+
+sim.df %>%
+  ggpairs(
+    lower = list(continuous = wrap("smooth", alpha = 0.15, size = 0.4)),
+    upper = list(continuous = wrap("cor", size = 4)),
+    diag  = list(continuous = wrap("densityDiag", alpha = 0.4))
+  ) +
+  theme_bw(base_size = 11)
+
+```
+
+A few things to flag from Figure \@ref(fig:pairs):
+
+-   `x_1` and `x_3` have a strong positive correlation ($r \approx 0.88$). That's going to matter in a moment.
+-   The relationship between `y` and `x_2` isn't linear — the smoother bends. This is a hint about the nonlinearity we've built in.
+-   The `y` distribution has a long right tail and at least one extreme point.
+
+File these observations away. They'll come back at every diagnostic step.
+
+------------------------------------------------------------------------
+
+## Step 2: Model Estimation
+
+Now we fit our baseline model. This is the model *as if we didn't know about any of the problems* — it's the starting point, not the ending point.
+
+```{r}
+#| label: basemod
+#| results: 'asis'
+
+ols.base <- lm(y ~ x_1 + x_2 + x_3,
+               data = sim.df)
+
+# uncomment to check in RStudio editor:
+# screenreg(ols.base)
+
+htmlreg(ols.base,
+        format        = "apsr",
+        caption       = "Baseline OLS Model (Misspecified)",
+        caption.above = TRUE,
+        single.row    = TRUE)
+
+```
+
+Before we trust a single one of these coefficients, we need to run diagnostics. The quick four-plot suite gives us an initial read:
+
+```{r}
+#| label: basemod-diags
+#| fig.cap: "Baseline diagnostic plots. Several problems are already visible."
+
+par(mfrow = c(2, 2))
+plot(ols.base)
+
+```
+
+The residuals vs. fitted plot (top left) shows a clear curve — a signal of nonlinearity. The Q-Q plot (top right) has heavy tails. The scale-location plot (bottom left) fans upward — heteroscedasticity. The residuals vs. leverage plot (bottom right) shows a few observations in the right-hand tail. We've got work to do.
+
+------------------------------------------------------------------------
+
+## Step 3: Multicollinearity
+
+We check multicollinearity *before* looking at residuals because it's a structural property of the design matrix, not a residual-based problem. High multicollinearity inflates standard errors and can make coefficient estimates look unstable in ways that have nothing to do with your functional form or your error distribution. It's cleaner to deal with this before you start interpreting the residual plots.[^1]
+
+[^1]: For a thorough treatment of multicollinearity — including perfect, essential, and structural types — see my standalone document on the topic at `studycourts.github.io/gradData/multicollinearity.html`.
+
+The gold standard diagnostic is the Variance Inflation Factor (VIF). Recall that $\text{VIF}_k = \frac{1}{1 - R^2_{x_k | x_{-k}}}$, where $R^2_{x_k | x_{-k}}$ is the $R^2$ from regressing predictor $k$ on all other predictors. A VIF above 5 or 10 is a common rule of thumb for concern.
+
+```{r}
+#| label: vif
+
+kable(vif(ols.base),
+      col.names = c("VIF"),
+      caption   = "Variance Inflation Factors, Baseline Model",
+      digits    = 2) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+`x_1` and `x_3` both have VIF scores well above 10. This is *essential* multicollinearity — these two variables are measuring highly overlapping things (recall from the DGP that $x_3 = 0.7 x_1 + \text{noise}$). This is a real problem, not a structural artifact like you'd see with interaction terms.
+
+::: question
+OK so the VIFs are high. What do I actually *do* about this?
+
+You have a few options. The most theoretically motivated choice is usually to **drop one of the collinear variables** if they're genuinely measuring the same underlying concept — keeping both in the model just adds noise. If you have theoretical reasons to believe both variables matter, you can sometimes **combine them** into a single composite (e.g., via a mean index or PCA). A third option is to **leave them both in** and acknowledge that your standard errors are inflated — this is defensible if your goal is prediction rather than causal inference from individual coefficients, or if dropping either would introduce omitted variable bias.
+
+In this example, $x_1$ and $x_3$ come from different parts of the true model, so we'll keep both for now and treat the inflated SEs as the cost of controlling for both. In your own work, the right choice depends on your theory. For more, see [my deep dive into multicollinearity](https://studycourts.github.io/gradData/multicollinearity.html).
+:::
+
+------------------------------------------------------------------------
+
+## Step 4: Nonlinearity
+
+Nonlinearity is the most important diagnostic to run *before* outliers and heteroscedasticity, because misspecified functional form creates both of them artificially. A variable that has a U-shaped relationship with $y$ will look like a fan in the scale-location plot and will generate residuals that look like outliers near the extremes of $x$. Fix the functional form first, then re-examine.
+
+We start with the **Ramsey RESET test**, which tests whether adding higher-order powers of the fitted values would significantly improve the model. The null hypothesis is correct specification; rejection means some nonlinear combination of the existing predictors is missing.
+
+```{r}
+#| label: reset
+
+resettest(ols.base, type = "regressor")
+
+```
+
+We reject the null handily. Something nonlinear is going on. The RESET test tells us there's a problem; it doesn't tell us *which variable*. For that, we use **component-plus-residual (CR) plots**, which plot the partial residuals for each predictor against that predictor. If the smooth (pink line) deviates substantially from the linear fit (blue line), that variable is a candidate.
+
+```{r}
+#| label: crplots
+#| fig.cap: "Component-plus-residual plots. The curvature in x_2 is the clearest signal of nonlinearity."
+
+crPlots(ols.base,
+        terms = ~ x_1 + x_2 + x_3)
+
+```
+
+`x_2` shows a pronounced inverted-U shape in Figure \@ref(fig:crplots). That's our culprit. We know from the DGP it's quadratic, so we'll add $x_2^2$ as a polynomial term. In your own work, you won't know the true form — in that case, you would compare a polynomial term, a log transformation, and a natural cubic spline, evaluating each using the RESET test and AIC/BIC.[^2]
+
+[^2]: See Homework 8 for a detailed worked example of this comparison, including the logic of choosing between polynomial and spline specifications for inferential vs. predictive goals.
+
+```{r}
+#| label: poly-mod
+#| results: 'asis'
+
+ols.poly <- lm(y ~ x_1 + poly(x_2, 2, raw = TRUE) + x_3,
+               data = sim.df)
+
+htmlreg(ols.poly,
+        format        = "apsr",
+        caption       = "OLS Model with Quadratic Term for x_2",
+        caption.above = TRUE,
+        single.row    = TRUE)
+
+```
+
+```{r}
+#| label: reset-poly
+
+resettest(ols.poly, type = "regressor")
+
+```
+
+The RESET test no longer rejects. Let's confirm visually:
+
+```{r}
+#| label: crplots2
+#| fig.cap: "CR plots after adding the quadratic term. The curvature in x_2 is now gone."
+
+crPlots(ols.poly)
+
+```
+
+The nonlinearity is resolved. We now use `ols.poly` as our working model for all subsequent diagnostics.
+
+------------------------------------------------------------------------
+
+## Step 5: Outliers and Influence
+
+With the correct functional form in place, we can now assess whether any observations are unduly influencing our estimates. There are three types of outliers worth distinguishing:[^3]
+
+[^3]: For a full treatment of outlier types, simulation-based visualizations, and treatment strategies, see my standalone outliers document at `studycourts.github.io/gradData/outliers.html`.
+
+-   **Regression outliers** — observations with large residuals (far from the fitted line on $y$)
+-   **High leverage points** — observations with extreme predictor values (far from the center of the $x$ space)
+-   **Influential observations** — high leverage points that also have large residuals; they actually *pull* the regression line toward them
+
+The **studentized residuals** with a Bonferroni correction (`car::outlierTest()`) gives us a formal test for the most extreme residuals:
+
+```{r}
+#| label: outliertest
+
+car::outlierTest(ols.poly)
+
+```
+
+We've identified a handful of observations with large studentized residuals. Now let's see which ones are actually *influential* — meaning they're not just large residuals, but they're also pulling hard on the regression line. The tool for this is **Cook's Distance**, which measures how much the fitted values would change if we deleted each observation. The conventional cutoff is $4/(n - k - 1)$.
+
+```{r}
+#| label: cooksd
+#| fig.cap: "Cook's Distance plot. Observations above the cutoff are worth investigating."
+
+cutoff <- 4 / (nrow(sim.df) - length(ols.poly$coefficients) - 2)
+plot(ols.poly, which = 4, cook.levels = cutoff)
+
+```
+
+The three planted outliers (rows 301, 302, 303) are clearly flagged. Let's get a fuller picture using the influence bubble plot, which combines leverage (x-axis), studentized residuals (y-axis), and Cook's D (bubble size) in one view:
+
+```{r}
+#| label: influenceplot
+#| fig.cap: "Influence plot. Large bubbles in the upper- or lower-right corner indicate truly influential observations."
+
+influencePlot(ols.poly,
+              main = "Influence Plot",
+              sub  = "Circle size is proportional to Cook's D.")
+
+```
+
+Observations 301 and 302 are both high leverage *and* have large residuals — exactly the definition of an influential observation. Let's also check the DFBETAS, which measure how much each individual coefficient changes when each observation is removed:
+
+```{r}
+#| label: dfbetas
+#| fig.cap: "DFBETAS plots. Values beyond the dashed lines indicate observations that substantially shift a specific coefficient."
+
+ols_plot_dfbetas(ols.poly)
+
+```
+
+::: question
+These three observations are clearly problematic. Do I just drop them?
+
+Not necessarily — and not automatically. The right question to ask first is *why* is each observation extreme? If it's a data entry error (a code of 999 where 1–5 was intended, or a decimal point in the wrong place), drop it and fix your data. If it's a valid but unusual case, you have more options: you can **dummy it out** (add an indicator variable that is 1 for that observation and 0 for all others, which absorbs its effect without discarding the information), you can **use robust regression** to downweight it, or you can **acknowledge and retain it** with a footnote explaining why.
+
+In this example, our three planted outliers are clearly artificial, so we'll proceed by removing them to show you the clean workflow. In your own research, be conservative — dropping valid observations without justification is a form of data manipulation. Your other options are discussed in more depth in this [deep dive into outliers](https://studycourts.github.io/gradData/outliers.html).
+:::
+
+```{r}
+#| label: drop-outliers
+
+# remove the three planted outliers
+sim.clean <- sim.df[-c(301, 302, 303), ]
+
+# re-estimate the model on the cleaned data
+ols.clean <- lm(y ~ x_1 + poly(x_2, 2, raw = TRUE) + x_3,
+                data = sim.clean)
+
+```
+
+------------------------------------------------------------------------
+
+## Step 6: Residual Normality
+
+OLS doesn't require normally distributed errors for the coefficient estimates to be unbiased — but it does require it for our confidence intervals and hypothesis tests to be exactly correct in small samples. In large samples, the Central Limit Theorem gives us approximate normality of the sampling distribution regardless, so this assumption is less pressing with more data. Still, it's worth checking.
+
+The two standard tools are the **Q-Q plot** (visual) and the **Shapiro-Wilk test** (formal):
+
+```{r}
+#| label: normality
+#| fig.cap: "Q-Q plot of studentized residuals. Points following the dashed line indicate normality."
+
+car::qqPlot(ols.clean,
+            main = "Q-Q Plot of Studentized Residuals",
+            ylab = "Studentized Residuals")
+
+```
+
+```{r}
+#| label: shapiro
+
+shapiro.test(rstandard(ols.clean))
+
+```
+
+::: question
+My Shapiro-Wilk test is significant. Should I panic?
+
+Probably not. A few things are worth remembering here. First, in large samples, Shapiro-Wilk is so sensitive that it will reject for trivially small departures from normality that have essentially no impact on your inferences. Second, non-normality in the residuals can itself be a *symptom* of problems you've already fixed — outliers and nonlinearity both distort the residual distribution. If your Q-Q plot shows only mild departures in the tails (not a systematic curve or heavy skew), you're usually fine to proceed. If the Q-Q plot is badly curved or the residuals are highly skewed, you might consider a transformation of $y$ (we'll see this option again in the heteroscedasticity section).
+:::
+
+In our case, the Q-Q plot looks quite good after removing the outliers and correcting the functional form. The Shapiro-Wilk test may still reject with $n = 300$ for reasons that matter very little practically. We'll proceed.
+
+------------------------------------------------------------------------
+
+## Step 7: Heteroscedasticity
+
+Heteroscedasticity means the variance of the errors is not constant — it varies systematically across the range of the predictors or fitted values. OLS remains unbiased in its coefficient estimates under heteroscedasticity, but the standard errors become unreliable. They can be too big *or* too small, with no way to know which without further investigation. That's an inference problem.
+
+**Visual diagnosis first.** The scale-location plot from `plot(model)` is the key one — you're looking for a flat horizontal line with roughly equal spread. The residuals-vs-fitted plot helps too.
+
+```{r}
+#| label: het-plots
+#| fig.cap: "Diagnostic plots after removing outliers and correcting nonlinearity. The fanning in the scale-location plot is the heteroscedasticity signal."
+
+par(mfrow = c(2, 2))
+plot(ols.clean)
+
+```
+
+The fanning in the scale-location plot (bottom left) is unmistakeable. Now let's confirm with formal tests. The **Breusch-Pagan test** regresses the squared residuals on the predictors; rejection means at least one predictor is linearly associated with the error variance. The **White test** extends this to include squared terms and cross-products, making it sensitive to nonlinear variance structures as well. The **Goldfeld-Quandt test** splits the data into two groups based on a predictor (often the one suspected of driving heteroscedasticity) and tests whether the variance of the residuals differs between them.
+
+```{r}
+#| label: het-tests
+
+# Breusch-Pagan test
+bptest(ols.clean)
+
+# White test using fitted values and their square
+sim.clean$fitted.clean <- fitted(ols.clean)
+bptest(ols.clean,
+       ~ fitted.clean + I(fitted.clean^2),
+       data = sim.clean)
+
+# Goldfeld-Quandt test, splitting on x_1, x_2, x_3
+lmtest::gqtest(ols.clean, order.by = ~ x_1, data = sim.clean)
+lmtest::gqtest(ols.clean, order.by = ~ x_2, data = sim.clean)
+lmtest::gqtest(ols.clean, order.by = ~ x_3, data = sim.clean)
+
+```
+
+All three tests reject the null of homoscedasticity. The GQ test suggests that the issue might be happening along $x_1$ and/or $x_2$. We have a real heteroscedasticity problem. Now we need to decide how to treat it.
+
+### Three Treatments
+
+**Option 1: HC-Robust Standard Errors.** This is often the simplest and most defensible fix. We keep the OLS coefficient estimates (which are still unbiased) but replace the standard errors with heteroscedasticity-consistent (HC) versions using the `sandwich` package. The coefficient estimates don't change; only the inference does.
+
+```{r}
+#| label: hcse
+#| results: 'asis'
+
+hc1.clean <- coeftest(ols.clean,
+                      vcov = vcovHC(ols.clean, type = "HC1"))
+
+htmlreg(list("OLS" = ols.clean,
+        format        = "apsr",
+             "HC1 Robust SE" = hc1.clean),
+        caption       = "OLS vs. HC-Robust Standard Errors",
+        caption.above = TRUE,
+        single.row    = TRUE)
+
+```
+
+> Robust standard errors do *not* fix the heteroscedasticity — they fix the inference *in the presence of* heteroscedasticity. This is an important distinction. Your point estimates are unchanged; you're just getting honest uncertainty estimates around them.
+
+**Option 2: Weighted Least Squares (WLS).** WLS assigns lower weight to observations with higher error variance, making the estimation process itself heteroscedasticity-aware. The weight for each observation is (proportional to) $1/\hat{\sigma}_i^2$, where $\hat{\sigma}_i$ is estimated from an auxiliary regression of $\log(\hat{\varepsilon}_i^2)$ on the predictors.
+
+```{r}
+#| label: wls
+#| results: 'asis'
+
+# auxiliary variance model: log(squared residuals) ~ predictors
+sim.clean$log.resid2 <- log(resid(ols.clean)^2)
+
+var.mod <- lm(log.resid2 ~ x_1 + x_2 + x_3,
+              data = sim.clean)
+
+# construct WLS weights as 1/exp(fitted values from variance model)
+sim.clean$wls.weights <- 1 / exp(fitted(var.mod))
+
+wls.clean <- lm(y ~ x_1 + poly(x_2, 2, raw = TRUE) + x_3,
+                data    = sim.clean,
+                weights = wls.weights)
+
+htmlreg(list("OLS" = ols.clean,
+             "WLS" = wls.clean),
+        format        = "apsr",
+        caption       = "OLS vs. WLS",
+        caption.above = TRUE,
+        single.row    = TRUE)
+
+```
+
+```{r}
+#| label: wls-bp
+
+# check whether WLS resolved the heteroscedasticity
+bptest(wls.clean)
+
+```
+
+**Option 3: Log-transformation of** $y$. When the variance of the errors grows with the level of $y$ itself (not just with the predictors), a log transformation of the dependent variable can stabilize the variance. The trade-off is interpretive: coefficients now represent the expected change in $\log(y)$ for a one-unit change in $x$, which you'll need to back-transform for a plain-English reading.[^4]
+
+[^4]: If your DV has zero or negative values, you'll need to add a constant before logging. A common choice is the absolute value of the most negative observation plus a small buffer. For example, if the minimum of $y$ is $-15$, you might use $\log(y + 16)$.
+
+```{r}
+#| label: log-mod
+#| results: 'asis'
+
+# y is all positive in this simulation, so we can log directly
+ols.log <- lm(log(y) ~ x_1 + poly(x_2, 2, raw = TRUE) + x_3,
+              data = sim.clean)
+
+bptest(ols.log)  # check whether the log transformation helped
+
+htmlreg(list("OLS" = ols.clean,
+             "Log-Lin" = ols.log),
+        format        = "apsr",
+        caption       = "OLS vs. Log-Transformed DV",
+        caption.above = TRUE,
+        single.row    = TRUE)
+
+```
+
+------------------------------------------------------------------------
+
+## Step 8: Model Selection
+
+We now have several candidate models: the misspecified baseline (`ols.base`), the polynomial-corrected model (`ols.clean`), the WLS version (`wls.clean`), and the log-transformed version (`ols.log`). How do we choose?
+
+The right comparison depends on what you're trying to accomplish. Here are the tools we'll use:
+
+-   **ANOVA F-test** (`anova()`) — valid for nested models (one model is a special case of the other); tests whether the additional parameters significantly improve fit.
+-   **AIC and BIC** — information criteria that penalize model complexity; lower is better. BIC penalizes extra parameters more heavily than AIC, reflecting a stronger preference for parsimony. For *inference* (as opposed to prediction), lean on BIC.
+-   **`performance::compare_performance()`** — gives you AIC, BIC, $R^2$, RMSE, and a ranking in one table.
+
+First, let's compare the misspecified baseline to the polynomial-corrected model. These are nested (the baseline is a special case of the polynomial model where the $x_2^2$ coefficient is zero):
+
+```{r}
+#| label: anova-test
+
+anova(ols.base, ols.clean, test = "F")
+
+```
+
+The F-test strongly prefers the polynomial model. Now let's do a broader comparison across all specifications:
+
+```{r}
+#| label: compare
+#| results: 'asis'
+
+comp <- compare_performance(
+  ols.base, ols.clean, wls.clean, ols.log,
+  rank = TRUE
+)
+
+comp$Name <- c("Baseline (misspecified)", "Polynomial OLS",
+               "WLS", "Log-Lin")
+
+kable(comp,
+      caption = "Model Comparison",
+      digits  = 3) %>%
+  kable_styling(full_width = TRUE)
+
+```
+
+::: question
+The metrics are pointing in different directions. Which model do I pick?
+
+This is where the art comes in. A few principles to guide the decision: (1) **A model that fixes a real problem is better than one that doesn't**, even if the fit statistics are similar. If WLS or HC-robust SEs actually resolve the heteroscedasticity, that matters for your inference even if $R^2$ looks similar. (2) **Prioritize BIC over AIC for inference** — it penalizes complexity more and discourages overfitting when your goal is to understand coefficients, not to make predictions. (3) **The log-transformed model changes the estimand** — if your research question is about absolute changes in $y$, a log-lin model gives you a different answer. Make sure the model you choose is answering the question you're asking. (4) **Look at the substantive differences in effects**, not just the fit statistics. If your key coefficient barely changes across specifications, you have good evidence of robustness.
+:::
+
+For this example, we'll go with the polynomial OLS model with HC-robust standard errors (`ols.clean` + `vcovHC`). The RESET test clears, the functional form is correct, and HC standard errors give us honest inference without changing the coefficient estimates.
+
+------------------------------------------------------------------------
+
+## Step 9: Presenting the Final Results
+
+Once you've settled on a model, you need to present it clearly. This means three things: a clean regression table, an honest comparison to the baseline, and effects plots that communicate the substantive story.
+
+### Regression Table
+
+```{r}
+#| label: finaltable
+#| results: 'asis'
+
+# define coefficient labels
+labz <- list(
+  "(Intercept)"              = "Intercept",
+  "x_1"                      = "$x_1$",
+  "poly(x_2, 2, raw = TRUE)1" = "$x_2$",
+  "poly(x_2, 2, raw = TRUE)2" = "$x_2^2$",
+  "x_3"                      = "$x_3$"
+)
+
+htmlreg(list("Baseline OLS" = ols.base,
+             "Final Model (HC SE)" = hc1.clean),
+        format        = "apsr",
+        custom.coef.map = labz,
+        caption         = "Baseline vs. Final Model",
+        caption.above   = TRUE,
+        single.row      = FALSE,
+        stars           = c(0.001, 0.01, 0.05))
+
+```
+
+### Effects Plots
+
+For main effects and any polynomial or interaction terms, `ggpredict()` from `ggeffects` is your friend. It plots the predicted values of $y$ across the range of a predictor, holding all other predictors at their means (or at values you specify). This is the right way to communicate the substantive size of an effect.
+
+```{r}
+#| label: effects
+#| fig.cap: "Marginal predicted values of y across the range of each predictor. The HC-robust confidence intervals are passed via the vcov argument."
+
+# generate predictions with HC-robust standard errors
+pred.x1 <- ggpredict(ols.clean, terms = "x_1",
+                     vcov = vcovHC(ols.clean, type = "HC1"))
+pred.x2 <- ggpredict(ols.clean, terms = "x_2 [all]",
+                     vcov = vcovHC(ols.clean, type = "HC1"))
+pred.x3 <- ggpredict(ols.clean, terms = "x_3",
+                     vcov = vcovHC(ols.clean, type = "HC1"))
+
+p1 <- plot(pred.x1) +
+  labs(title = expression(x[1]),
+       x = expression(x[1]), y = "Predicted y") +
+  theme_minimal()
+
+p2 <- plot(pred.x2) +
+  labs(title = expression(x[2] ~ "(quadratic)"),
+       x = expression(x[2]), y = "Predicted y") +
+  theme_minimal()
+
+p3 <- plot(pred.x3) +
+  labs(title = expression(x[3]),
+       x = expression(x[3]), y = "Predicted y") +
+  theme_minimal()
+
+p1 + p2 + p3 +
+  plot_annotation(title = "Marginal Predicted Effects with HC-Robust 95% CIs")
+
+```
+
+The inverted-U in the $x_2$ panel (Figure \@ref(fig:effects)) captures the quadratic relationship we recovered. The linear effects of $x_1$ and $x_3$ look as expected. Notice that the confidence intervals are wider where the data are sparser (the tails of the distribution) — that's appropriate, and it's part of why effects plots are more honest than just reading coefficients off a table.
+
+------------------------------------------------------------------------
+
+## A Final Word on the Workflow
+
+The nine steps above aren't a rigid checklist — they're a logical sequence built around two ideas: (1) fix problems before you diagnose the things that those problems contaminate, and (2) make modeling decisions for substantive reasons, not just because a test came back significant.
+
+In practice, the workflow is iterative. You might fix nonlinearity in Step 4 and then discover in Step 5 that two of your apparent outliers have vanished. You might find in Step 7 that a log transformation of $y$ resolves both the heteroscedasticity *and* the non-normality from Step 6, meaning you can go back and simplify. That's not a sign you did something wrong — it's the diagnostic process working as intended.
+
+The goal isn't a model that passes every test. The goal is a model whose assumptions you've genuinely interrogated, whose problems you've honestly addressed, and whose results you can defend.
+
+------------------------------------------------------------------------
+
+## References
