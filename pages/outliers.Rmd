@@ -11,7 +11,7 @@ output:
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
-bibliography: hw.bib
+bibliography: site_refs.bib
 csl: gill_apsr.csl
 knit: (function(input, ...) {
     rmarkdown::render(
@@ -338,9 +338,7 @@ I see what you're doing here. You're trying to get me off track. If you really n
 
 For each observation $i$, Cook's $D_i$ measures the effect of deleting that observation on the regression coefficients. It's calculated as:
 
-$$
-D_{i}={\frac {\sum _{j=1}^{n}\left({\widehat {y}}_{j}-{\widehat {y}}_{j(i)}\right)^{2}}{ks^{2}}}
-$$
+$$D_{i}={\frac {\sum _{j=1}^{n}\left({\widehat {y}}_{j}-{\widehat {y}}_{j(i)}\right)^{2}}{ks^{2}}}$$
 
 where $k$ is the number of variables in the model and $s^2$ is the mean squared error. A common rule of thumb is to investigate observations with $D_i > \frac{4}{n-k-1}$. Here, let's plot this along with the typical cut-off line (which is 4 divided by the number of observations minus the number of predictors minus 1). We'll put a red line at this cutoff to make it easier to see which observations exceed it.
 
@@ -551,10 +549,10 @@ I know. I'm sorry. But there really isn't a single best method for dealing with 
 
 There are, however, a few tips that might help you make this decision.
 
--   If the outliers are the result of data entry errors or other mistakes, then dropping them from the analysis is often the best option.
--   If you have a small number of outliers that represent a real phenomenon that we want to understand, then dummying them out allows you to capture something about how these cases differ from the others, perhaps even making your theory more nuanced.
--   If you have more than just a few observations that are outliers on a specific variable (that don't have an obvious, theoretically relevant characteristic in common), then Winsorizing can be a good option.
--   If you have a lot of outliers across a number of different combinations of variables and/or if you want to be more systematic about dealing with them, then robust regression methods can provide more reliable estimates in the presence of outliers.
+- If the outliers are the result of data entry errors or other mistakes, then dropping them from the analysis is often the best option.
+- If you have a small number of outliers that represent a real phenomenon that we want to understand, then dummying them out allows you to capture something about how these cases differ from the others, perhaps even making your theory more nuanced.
+- If you have more than just a few observations that are outliers on a specific variable (that don't have an obvious, theoretically relevant characteristic in common), then Winsorizing can be a good option.
+- If you have a lot of outliers across a number of different combinations of variables and/or if you want to be more systematic about dealing with them, then robust regression methods can provide more reliable estimates in the presence of outliers.
 
 Outliers are a fact of life in real-world data analysis. Not all outliers are problematic—regular outliers and even some high-leverage points can be perfectly fine to include in your models. The outliers we need to worry about are influential observations that bias our coefficient estimates.
 

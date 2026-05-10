@@ -11,7 +11,7 @@ output:
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
-bibliography: hw.bib
+bibliography: site_refs.bib
 csl: gill_apsr.csl
 knit: (function(input, ...) {
     rmarkdown::render(
@@ -144,20 +144,16 @@ Let's consider the regression model: $$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 +
 
 If $x_2$ is a perfect linear combination of $x_1$ (i.e., $x_2 = 2 * x_1$), then we can rewrite the model as:
 
-$$
-\begin{align}
+$$\begin{align}
 y &= \beta_0 + \beta_1 x_1 + \beta_2 (2 * x_1) + e \\
   &= \beta_0 + (\beta_1 + 2\beta_2) x_1 + e
-\end{align}
-$$
+\end{align}$$
 
 This means that we end up with two coefficients, $\beta_1$ and $2 \times \beta_2$ multiplied by just one of our explanatory variables. This is because we've substituted a linear transformation of $x_1$ for the values in $x_2$. This, in turn, causes $x_2$ to drop out of our equation. In this case, we cannot estimate $\beta_1$ and $\beta_2$ separately because the underlying measures are perfectly correlated (ie. $\rho_{(x_1,x_2)} = 1.0$). The regression model will fail to estimate the coefficients, and we won't be able to determine the individual effect of each predictor variable on the dependent variable. In other words, $x_2$ adds *no additional information* to our model above what $x_1$ already provides.
 
 Even if we could find an estimate for $\beta_1$ and $\beta_2$, the standard errors also pose a problem. Recall that the variance for $\hat{\beta}_1$ in a regression with two predictor variables is:
 
-$$
-\textrm{Var}(\hat{\beta}_1) = \frac{\sigma^2}{\sum (x_i - \bar{x})^2 (1 - R^2_{x_1|x_2})}
-$$
+$$\textrm{Var}(\hat{\beta}_1) = \frac{\sigma^2}{\sum (x_i - \bar{x})^2 (1 - R^2_{x_1|x_2})}$$
 
 ::: question
 What is $R^2_{x_1|x_2}$ in this equation?
@@ -190,9 +186,7 @@ High but imperfect multicollinearity does *not* actually violate our regression 
 
 Recall that the estimate of the partial slope coefficient $\hat{\beta}_1$ in a regression with two predictor variables is:
 
-$$
-\hat{\beta}_1 = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sum (x_i - \bar{x})^2 (1 - R^2_{x_1|x_2})}
-$$
+$$\hat{\beta}_1 = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sum (x_i - \bar{x})^2 (1 - R^2_{x_1|x_2})}$$
 
 Now, imagine that the Venn diagram below shows the configuration of the overlap between $Y$, $X_1$, and $X_2$.
 
@@ -257,9 +251,7 @@ Wait, why does this happen?
 
 My bad. Let me slow down a bit. Remember this equation?
 
-$$
-\hat{\beta}_1 = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sum (x_i - \bar{x})^2 \bbox[white, 2pt, border: 1.5px solid red]{(1 - R^2_{x_1|x_2})}}
-$$
+$$\hat{\beta}_1 = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sum (x_i - \bar{x})^2 \bbox[white, 2pt, border: 1.5px solid red]{(1 - R^2_{x_1|x_2})}}$$
 
 I've put a red box around the relevant term in the denominator of the equation. This term represents the proportion of the variance in $x_1$ that is *not* explained by $x_2$. We get this by estimating the auxilliary regression $x_1 = b_0 + b_1x_2 + e$ and using the $R^2$ value from that regression. When we have high multicollinearity, the term in red becomes very small. The same thing will happen in our estimate of $\hat{\beta}_2$ because the same term will be in the denominator of that equation. This means that there is less information about the independent relationship between $Y$ and each of the predictor variables. This means that the estimate of the $\hat{\beta}$s becomes less precise.
 
@@ -271,9 +263,7 @@ Not quite. The resulting estimates of $\hat{\beta}_1$ and $\hat{\beta}_2$ will s
 
 So the real problem comes with the standard errors. See, the estimates of $\beta$ will be unstable, but not predictably wrong in any knowable direction (this would be bias). You'll remember, though, that this same term ($1-R^2_{x_1|x_2}$) is in the denominator of the variance formula for $\hat{\beta}_1$ and $\hat{\beta}_2$.
 
-$$
-\textrm{Var}(\hat{\beta}_1) = \frac{\sigma^2}{\sum (x_i - \bar{x})^2 \bbox[white, 2pt, border: 1.5px solid red]{(1 - R^2_{x_1|x_2})}}
-$$
+$$\textrm{Var}(\hat{\beta}_1) = \frac{\sigma^2}{\sum (x_i - \bar{x})^2 \bbox[white, 2pt, border: 1.5px solid red]{(1 - R^2_{x_1|x_2})}}$$
 
 This means that when we have high multicollinearity, the variance of our estimates becomes very large. This can lead to a higher risk of committing Type II errors. We can see this in the figure below. There, I've simulated some data and run a bunch of models under conditions of low multicollinearity ($\rho = 0.10$) and high but imperfect multicollinearity ($\rho = 0.90$). The figure shows the distribution of $\hat{\beta}_1$ over 1,000 simulations for the low multicollinearity (teal) and high multicollinearity (peach) models. I've set the true value of $\beta_1$ at 2, which is indicated by the dashed vertical line. We can see that the distribution of $\hat{\beta}_1$ for the model with high multicollinearity is much wider than the distribution for the model with low multicollinearity, which indicates that the estimates are less precise in the presence of high multicollinearity.
 
@@ -331,9 +321,7 @@ To diagnose problematic multicollinearity, a good starting point is to look at t
 
 A more reliable method is to calculate the *variance inflation factor* (VIF) for each predictor variable. The VIF measures how much the variance of the estimated regression coefficients is inflated due to multicollinearity. The VIF for a predictor variable is calculated as:
 
-$$
-\textrm{VIF} = \frac{1}{1 - R^2_{x_k|x_{-k}}}
-$$
+$$\textrm{VIF} = \frac{1}{1 - R^2_{x_k|x_{-k}}}$$
 
 Do you recognize anything in this equation?
 
@@ -747,9 +735,7 @@ A lot of practitioners get the impression that only OLS models need diagnostics.
 
 In a Gaussian linear model estimated using MLE, the likelihood is
 
-$$
-\ell(\beta, \sigma^2) = -\frac{n}{2} \log(2\pi\sigma^2) - \frac{1}{2\sigma^2} (y - X\beta)^T (y - X\beta)
-$$
+$$\ell(\beta, \sigma^2) = -\frac{n}{2} \log(2\pi\sigma^2) - \frac{1}{2\sigma^2} (y - X\beta)^T (y - X\beta)$$
 
 Maximizing this with respect to $\beta$ yields the same normal equations as OLS: $\hat{\beta}_{MLE} = (X^T X)^{-1} X^T y$. So the MLE point estimates are *algebraically identical* to OLS estimates. Whatever multicollinearity does to OLS (e.g., inflated standard errors, numerically unstable coefficient estimates, a nearly singular $(X^TX)$ matrix) it does to MLE for exactly the same reason. The likelihood surface becomes a flat ridge rather than a clean bowl. Many combinations of correlated predictors yield nearly identical likelihood values, so the estimator struggles to localize a unique maximum.
 

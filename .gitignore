@@ -14,3 +14,4 @@ euro.csv
 euro.rds
 euro_labels.csv
 **/*.quarto_ipynb
+.positai

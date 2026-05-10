@@ -11,7 +11,7 @@ output:
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
-bibliography: hw.bib
+bibliography: site_refs.bib
 csl: gill_apsr.csl
 knit: (function(input, ...) {
     rmarkdown::render(
