@@ -1,0 +1,670 @@
+---
+title: "GLM: Separability and Convergence Issues"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+output:
+  bookdown::html_document2:
+    mathjax: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+    number_sections: FALSE
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+    code_folding: show
+    self_contained: true
+    base_format: rmarkdown::html_document
+
+bibliography: site_refs.bib
+csl: gill_apsr.csl
+
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center"
+)
+
+options(scipen = 999)
+options(digits = 4)
+
+```
+
+```{=html}
+<!-- Needs editing
+DONE: fix yaml header and page title
+TODO:
+- finish troubleshooting errors starting at "firth" chunk
+- fold big chunks and add blockquote > click 'show' to see ...
+- add more .question divs, banter, humor
+- shorten H1 headers for the TOC
+- add more transitions, context, interpretation
+--->
+```
+
+```{css, echo=FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+mark {
+  background-color: LemonChiffon;
+  color: black;
+}
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width: 80%;
+  white-space: nowrap;
+}
+
+```
+
+```{r libs}
+
+P <- c(
+  "knitr",          # rendering
+  "kableExtra",     # table formatting
+  "performance",    # check_collinearity(), check_convergence(), check_singularity()
+  "brglm2",         # bias-reduced GLM estimation (Firth's method)
+  "detectseparation",# formal separation detection
+  "lme4",           # glmer() for mixed model convergence examples
+  "car",            # vif() on linear proxies
+  "patchwork",      # combining ggplots
+  "tidyverse"       # wrangling and ggplot2 — load last
+)
+
+for (pkg in P) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, repos = "http://cran.us.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+
+rm(P, pkg)  # clean up the mess
+
+```
+
+```{r sims}
+
+set.seed(1975)   # for reproducibility
+
+# ── Simulation 1: Complete separation in a binary model ───────────────────────
+# a binary outcome that is perfectly predicted by one predictor
+# above a threshold, everyone succeeds; below, everyone fails
+
+n.sep  <- 200
+x.sep  <- rnorm(n.sep)                              # continuous predictor
+y.sep  <- as.integer(x.sep > 0)                    # perfect separation at x = 0
+
+sep.df <- data.frame(y = y.sep, x = x.sep)
+
+# ── Simulation 2: Quasi-complete separation ───────────────────────────────────
+# one predictor group has only successes; all others have a mix
+# common in political science with rare-event data
+
+n.qs   <- 300
+x.cat  <- sample(c("A", "B", "C"), n.qs, replace = TRUE,
+                 prob = c(0.1, 0.45, 0.45))        # categorical predictor
+x.cont <- rnorm(n.qs)                               # continuous predictor
+
+# group A always succeeds (quasi-complete separation on x.cat)
+p.qs   <- ifelse(x.cat == "A", 1,
+                 plogis(-0.5 + 0.8 * x.cont))
+y.qs   <- rbinom(n.qs, 1, p.qs)
+# ensure group A is all 1s
+y.qs[x.cat == "A"] <- 1
+
+qs.df  <- data.frame(y = y.qs, x.cat = x.cat, x.cont = x.cont)
+
+# ── Simulation 3: Multicollinearity in a logistic regression ──────────────────
+# two predictors that are highly correlated (r ~ 0.92)
+# shows how VIF interpretation transfers from OLS to GLMs
+
+n.mc   <- 500
+x1.mc  <- rnorm(n.mc)                              # base predictor
+x2.mc  <- 0.9 * x1.mc + rnorm(n.mc, sd = 0.44)    # highly correlated with x1 (r ≈ .92)
+x3.mc  <- rnorm(n.mc)                              # uncorrelated third predictor
+
+eta.mc <- -0.4 + 0.6 * x1.mc - 0.5 * x2.mc + 0.8 * x3.mc
+y.mc   <- rbinom(n.mc, 1, plogis(eta.mc))
+
+mc.df  <- data.frame(y = y.mc, x1 = x1.mc, x2 = x2.mc, x3 = x3.mc)
+
+# ── Simulation 4: Singular fit in a GLMM ─────────────────────────────────────
+# clustered data with very little between-group variance
+# the random effect variance will be estimated at or near zero
+
+n.grp.s  <- 30          # groups
+n.per.s  <- 8           # obs per group — small groups exacerbate singularity
+n.tot.s  <- n.grp.s * n.per.s
+
+grp.id.s <- rep(seq_len(n.grp.s), each = n.per.s)
+u.s      <- rnorm(n.grp.s, 0, 0.02)       # near-zero true random effect variance
+u.i.s    <- u.s[grp.id.s]
+x.s      <- rnorm(n.tot.s)
+y.s      <- rbinom(n.tot.s, 1,
+                   plogis(-0.3 + 0.7 * x.s + u.i.s))
+
+sing.df  <- data.frame(y = y.s, x = x.s, grp = factor(grp.id.s))
+
+# ── Simulation 5: Hauck-Donner effect ────────────────────────────────────────
+# a predictor with a very large coefficient in a logistic model
+# the Wald test will be misleading; LRT will be correct
+
+n.hd   <- 400
+x.hd   <- rnorm(n.hd)
+# very large true coefficient — pushes predicted probs near 0 and 1
+eta.hd <- -1 + 8 * x.hd
+y.hd   <- rbinom(n.hd, 1, plogis(eta.hd))
+
+hd.df  <- data.frame(y = y.hd, x = x.hd)
+
+```
+
+------------------------------------------------------------------------
+
+## Introduction
+
+Most of the diagnostics covered in this series assume you've already got a model — something you've estimated, whose residuals you can examine and whose fit you can assess. But some problems arise *before* you can trust the model output at all. These are the problems that corrupt the estimation process itself, producing coefficient estimates that are wrong in ways that don't announce themselves with obvious errors or obvious residual patterns.
+
+Three problems belong in this category:
+
+**Separation** occurs when one or more predictors perfectly — or nearly perfectly — predict the outcome. The consequence is that the maximum likelihood estimator doesn't exist in any finite sense: the algorithm keeps pushing coefficients toward infinity, and the output you get (if you get any) is unreliable.
+
+**The Hauck-Donner effect** is a subtler version of the same phenomenon. When a coefficient is very large (even if it's finite), the Wald test statistic — the $z$-statistic in your standard output — can actually *decrease* as the true coefficient grows, producing misleading $p$-values that suggest statistical insignificance when the predictor is actually strongly related to the outcome.
+
+**Convergence failures and singular fits** are the mixed model versions of these problems. They arise when the data don't contain enough information to estimate all of the variance components in the model, or when the optimization algorithm runs into numerical difficulties. Like separation, they produce output that looks plausible but may be seriously wrong.
+
+This page works through each problem in turn: what causes it, how to detect it, what the output looks like, and what to do about it. Along the way, we'll also cover **multicollinearity** in the GLM context — a related problem that inflates standard errors without breaking estimation entirely — and address the temptation to use **stepwise selection** to deal with it (spoiler: don't).
+
+------------------------------------------------------------------------
+
+## Part I: Separation
+
+### What It Is
+
+In a binary logistic regression, **complete separation** occurs when there exists some linear combination of the predictors that perfectly separates the $Y = 0$ observations from the $Y = 1$ observations. The clearest case is a single continuous predictor with a threshold: everyone above the threshold gets $Y = 1$, everyone below gets $Y = 0$.
+
+**Quasi-complete separation** is the more common version: one or more predictor values (or combinations) are *exclusively* associated with one outcome category, though the association isn't perfect for all observations. This frequently happens in political science when working with rare events, small samples, or categorical predictors with low-frequency categories.
+
+::: question
+Why does separation cause a problem? If one predictor perfectly predicts the outcome, isn't that just... a very good model?
+:::
+
+In a practical sense, yes — the predictor is doing exactly what you'd want. But maximum likelihood estimation can't handle it. To understand why, think about what the logistic model is trying to do. It's fitting a sigmoid curve to the data, finding the slope ($\beta$) and intercept ($\beta_0$) that maximize the likelihood of the observed outcomes.
+
+When the data are completely separated, there's no finite slope that maximizes the likelihood. As $\hat{\beta}$ gets larger, the predicted probability for every $Y = 1$ observation gets closer to 1, and for every $Y = 0$ observation it gets closer to 0 — which is exactly right! The likelihood keeps increasing without bound as $\hat{\beta} \rightarrow \infty$. The MLE doesn't exist.[^1]
+
+[^1]: This is sometimes called the "monotone likelihood" problem: the log-likelihood function is monotonically increasing in $\hat{\beta}$, so it never achieves a maximum at any finite value. The algorithm keeps climbing, never finding a peak.
+
+What does R do in this situation? Usually one of three things: it runs to the iteration limit and returns whatever coefficient it had at that point (often very large in absolute value), it issues a warning that the algorithm did not converge, or in newer versions of R and `glm()`, it may issue an "algorithm did not converge" message alongside suspiciously large coefficients and inflated standard errors. In all cases, the output is unreliable.
+
+### Detecting Separation
+
+**Step 1: Look at crosstabs before you estimate.** For categorical predictors, cross-tabulate every predictor against the outcome. Empty cells (or cells with all zeros or all ones) are your first warning sign.
+
+```{r sep-crosstab}
+
+# check for empty or one-sided cells
+# table() gives observed counts in each predictor-outcome combination
+with(qs.df, table(x.cat, y))
+
+```
+
+Group A has zero observations with $Y = 0$ — a clear signal of quasi-complete separation. Before you even fit the model, you know the coefficient for group A is going to be problematic.
+
+**Step 2: Look at the model output.** After fitting, large coefficients (in absolute value — say, $|\hat{\beta}| > 10$) paired with very large standard errors are a strong signal. The standard error inflates because the likelihood surface is nearly flat in the direction of that coefficient, making it hard to pin down.
+
+```{r sep-fit, warning=TRUE, message=TRUE}
+
+# fit the completely separated model — observe the warning
+# suppressing the global warning=FALSE here so the output is visible
+sep.mod  <- glm(y ~ x, family = binomial, data = sep.df)
+qs.mod   <- glm(y ~ x.cat + x.cont, family = binomial, data = qs.df)
+
+# look at the coefficients
+coef(summary(sep.mod))
+coef(summary(qs.mod))
+
+```
+
+Notice what happens: the coefficient on `x` in the completely separated case (`sep.mod`) is enormous, and its standard error is similarly enormous — the ratio (the $z$-statistic) may look deceptively reasonable, but the individual components are off the charts. In `qs.mod`, the coefficient for group A will be huge with a huge standard error.
+
+**Step 3: Formal detection with `detectseparation`.** The `detectseparation` package [@detectseparation] provides a formal test for complete and quasi-complete separation, based on the linear programming approach of Konis (2007):
+
+```{r detectseparation}
+
+# method = "detect_separation" tests for complete or quasi-complete separation
+
+glm(y ~ x, 
+    data = sep.df, 
+    family = binomial(),
+    method = "detect_separation")
+glm(y ~ x.cat + x.cont, 
+    data = qs.df, 
+    family = binomial(),
+    method = "detect_separation")
+
+```
+
+The function returns `TRUE` if separation is detected and identifies which coefficients are infinite. This is more reliable than eyeballing the crosstab, particularly when separation involves a combination of predictors rather than a single variable.
+
+### What to Do About Separation
+
+You have several options, roughly in order of how often you'll reach for them:
+
+**1. Firth's penalized likelihood (bias-reduced logistic regression).** This is the most widely recommended approach. @firth1993 showed that adding a Jeffreys prior penalty to the log-likelihood produces coefficient estimates that are finite even under complete separation, and that are generally less biased than standard MLE. In R, use `brglm2::brglm()`:
+
+```{r firth}
+
+# Firth's penalized logistic regression via brglm2
+# the type = "AS_mean" option gives the "mean bias reduction" version
+firth.sep <- brglm2::brglm_fit(y ~ x,
+                            family = binomial,
+                            data   = sep.df,
+                            type   = "AS_mean")
+
+firth.qs  <- brglm2::brglm_fit(y ~ x.cat + x.cont,
+                            family = binomial,
+                            data   = qs.df,
+                            type   = "AS_mean")
+
+# compare: MLE (separated) vs. Firth (finite, interpretable)
+cat("MLE coefficient for x (sep.mod): ",
+    round(coef(sep.mod)["x"], 2), "\n")
+cat("Firth coefficient for x (firth.sep):",
+    round(coef(firth.sep)["x"], 2), "\n\n")
+
+cat("MLE SE for x (sep.mod):   ", round(coef(summary(sep.mod))["x","Std. Error"], 2), "\n")
+cat("Firth SE for x (firth.sep):", round(coef(summary(firth.sep))["x","Std. Error"], 2), "\n")
+
+```
+
+Firth's method shrinks extreme estimates toward zero, producing finite, interpretable coefficients with valid standard errors. The penalty is small when the data are well-behaved and automatically becomes influential exactly when it's needed most.
+
+**2. Exact logistic regression.** For small samples with sparse cells, exact logistic regression (available in `elrm` or `LogisticDx`) produces exact $p$-values without relying on asymptotic theory. This is computationally intensive and mainly useful when $n < 100$.
+
+**3. Bayesian logistic regression with informative priors.** Placing a moderately informative prior on the coefficient (e.g., a Student-$t$ prior with a few degrees of freedom) regularizes the estimate in the same spirit as Firth's method. `rstanarm::stan_glm()` with default weakly informative priors handles separation gracefully.
+
+**4. Drop or recode the offending predictor.** Sometimes the right answer is substantive: if a categorical predictor has a category with no variation in the outcome, consider collapsing it with an adjacent category or acknowledging in your write-up that the estimate for that category is not identified. This is less statistically sophisticated but sometimes the most honest approach.
+
+> <mark>Firth's penalized logistic regression is the current best-practice default for handling separation in applied political science work. It requires minimal additional assumptions, is available in R via `brglm2`, and produces coefficient estimates that are directly comparable to standard logistic regression in well-behaved data.</mark>
+
+------------------------------------------------------------------------
+
+## Part II: The Hauck-Donner Effect
+
+### What It Is
+
+Once separation is resolved — or even in well-behaved data with very large coefficients — there's a subtler problem worth knowing about: the **Hauck-Donner effect** [@hauckDonner1977].
+
+In a logistic regression (or any GLM estimated with MLE), the standard way to test whether a coefficient is significantly different from zero is the **Wald test**: divide the estimated coefficient by its standard error and compare the resulting $z$-statistic to a standard normal distribution.
+
+The trouble is that the Wald test statistic is a non-monotonic function of the true coefficient $\beta$. As $|\beta|$ grows from zero, the $z$-statistic initially increases — as you'd expect for a growing effect. But eventually, when $|\beta|$ is large enough to push many predicted probabilities near 0 or 1, the information matrix flattens out, the standard error grows faster than the coefficient, and the $z$-statistic actually *decreases*.
+
+In the most extreme cases, a logistic regression coefficient that is genuinely large and highly significant by any reasonable standard can produce a Wald $z$-statistic so small that it fails to reject the null hypothesis of $\beta = 0$. The predictor looks statistically insignificant even though it's very strongly related to the outcome.
+
+```{r hauck-donner-demo}
+
+# fit the Hauck-Donner example: large true coefficient of 8
+hd.mod <- glm(y ~ x, family = binomial, data = hd.df)
+
+# look at the summary: note the coefficient estimate vs. the z-statistic
+coef(summary(hd.mod))
+
+# for reference: what does the LRT say?
+# LRT compares the full model to the null model
+lrt.hd <- anova(
+  glm(y ~ 1, family = binomial, data = hd.df),
+  hd.mod,
+  test = "Chisq"
+)
+cat("\nLikelihood Ratio Test:\n")
+print(lrt.hd)
+
+```
+
+Look at the contrast: the $z$-statistic from the Wald test may look smaller than you'd expect given how strong the true relationship is, while the LRT $G$ statistic is highly significant. This divergence is the Hauck-Donner effect in action.
+
+### Why the Wald Test Fails Here
+
+The Wald test relies on a quadratic approximation to the log-likelihood around the MLE. This approximation is excellent when the log-likelihood surface is well-behaved near its peak. But when $|\hat{\beta}|$ is large, the log-likelihood surface in logistic regression is highly asymmetric — it has a long tail in one direction. The quadratic approximation breaks down, and the Wald-based standard error is an overestimate of the true uncertainty.
+
+The likelihood ratio test doesn't have this problem because it compares actual log-likelihood values — it doesn't rely on a quadratic approximation at all.
+
+> <mark>The Wald test ($z$-statistic) is unreliable for large coefficients in logistic regression. Use the likelihood ratio test (`anova(m0, m1, test = "Chisq")`) whenever you suspect a Hauck-Donner problem — that is, whenever a coefficient is large enough to push many predicted probabilities toward 0 or 1.</mark>
+
+::: question
+How big is "large enough" to worry about? Is there a threshold?
+:::
+
+There's no bright line, but some useful heuristics:
+
+- If $|\hat{\beta}| > 5$ in a logistic regression, treat the Wald $p$-value with suspicion and verify with the LRT.
+- If your predicted probabilities cluster near 0 or 1 (say, more than a third of observations have $\hat{p} < 0.05$ or $\hat{p} > 0.95$), the Wald test is unreliable for any coefficient in that model.
+- If you see a pattern where the Wald $z$-statistic for a predictor you expect to matter is surprisingly small, check the LRT and compare.
+
+Firth's penalized likelihood (from Part I) also helps here: the Wald tests from a Firth model are more reliable than from a standard `glm()` model when coefficients are large, because the penalization keeps the estimates away from the region where the quadratic approximation breaks down.
+
+### The Wald Test vs. the LRT: When to Use Which
+
+```{r wald-vs-lrt}
+
+# a well-behaved model: Wald and LRT should agree
+good.mod <- glm(y ~ x1 + x2 + x3,
+                family    = binomial,
+                data      = mc.df,
+                na.action = na.omit)
+
+# Wald tests (from summary)
+coef(summary(good.mod))[, c("Estimate", "z value", "Pr(>|z|)")]
+
+# LRT for each predictor via drop1()
+# drop1() removes each predictor in turn and runs an LRT
+drop1(good.mod, test = "Chisq")
+
+```
+
+For a well-specified model without large coefficients, Wald tests and LRTs agree closely. The LRT is generally more reliable and is the preferred method for testing individual predictors in the applied political science literature. Use `drop1(model, test = "Chisq")` rather than reading $p$-values off `summary()` output when precision matters.
+
+------------------------------------------------------------------------
+
+## Part III: Multicollinearity in GLMs
+
+### The Same Problem, a Different Setting
+
+Multicollinearity in GLMs causes the same substantive harm it does in OLS: imprecise coefficient estimates, inflated standard errors, and unreliable inference. The mechanism is essentially the same too — when predictors are highly correlated, the likelihood surface becomes a long flat ridge rather than a well-defined peak, making it hard to pin down individual coefficients even when the model overall fits well.[^2]
+
+[^2]: The difference is that in OLS, multicollinearity flattens the residual sum of squares surface; in a GLM, it flattens the log-likelihood surface. The practical consequences are identical: you can add or remove a correlated predictor and the fit barely changes, but the individual coefficient estimates can change dramatically. For a detailed treatment of multicollinearity in the OLS context (which applies here by analogy), see the [multicollinearity page](https://studycourts.github.io/gradData/multicollinearity.html) on this website.
+
+The main diagnostic challenge is that common tools like `car::vif()` don't work directly on all GLM families, and most don't work at all on `clm()`, `vglm()`, or `glmer()` objects. The solutions are straightforward, though.
+
+### VIF in GLMs: The Direct and Proxy Approaches
+
+For GLMs estimated with `glm()` — binary logistic, Poisson, negative binomial — `car::vif()` and `performance::check_collinearity()` both work directly on the model object:
+
+```{r vif-direct}
+
+# car::vif() works on glm() objects
+car::vif(good.mod)
+
+# performance::check_collinearity() gives a more narrative output
+performance::check_collinearity(good.mod)
+
+```
+
+For model classes where these don't work (`clm()`, `polr()`, `vglm()`, `glmer()`), use the **OLS proxy approach**: fit an OLS version of the model using the same predictors (with a numeric version of the outcome if necessary), and compute VIFs on that:
+
+```{r vif-proxy}
+
+# OLS proxy for multicollinearity check
+# outcome is a numeric version of y; what matters is the design matrix, not the DV
+mc.proxy <- lm(y ~ x1 + x2 + x3, data = mc.df)
+
+# VIF on the proxy
+car::vif(mc.proxy)
+
+```
+
+The VIF values from the proxy reflect the design matrix $\mathbf{X}^\top\mathbf{X}$ — the same object that determines multicollinearity in any linear or generalized linear model. A VIF above 5 is worth investigating; above 10 is a serious concern.
+
+::: question
+My VIF is 15. What do I actually *do* about it?
+:::
+
+You have a few options, and the right one depends on why the collinearity exists:
+
+**If it's a data problem** (two predictors that genuinely measure nearly the same thing): Drop one of them, choosing on theoretical grounds which to keep. Report the collinearity and justify your choice.
+
+**If it's a structural problem** (e.g., an interaction term is collinear with its components, or you've included both a variable and its square): This is expected and usually not a problem in practice. Mean-center the variables before computing the interaction or polynomial term to reduce the structural collinearity.
+
+**If it's a sample problem** (your sample is too small to distinguish two related constructs): Be honest about the limitation. Report the VIFs, acknowledge the uncertainty, and avoid over-interpreting the individual coefficients. Principal components or ridge regression can help, but these come with their own interpretive challenges.
+
+> Multicollinearity inflates standard errors but does not bias coefficient estimates. A model with high VIFs can still produce valid predictions and valid overall tests ($G$, AIC comparisons, LRTs). The problem is specifically with precision and interpretability of individual coefficients — not with the model's overall validity.
+
+------------------------------------------------------------------------
+
+## Part IV: Stepwise Selection — Don't
+
+This section exists because stepwise selection remains remarkably common in applied social science, and because the GLM context makes its problems *worse* than in OLS, not better.
+
+The premise of stepwise selection (forward, backward, or both-directions) is that you can automate the process of choosing which predictors belong in a model by iteratively adding or removing variables based on significance tests or information criteria. The appeal is obvious: you have 20 candidate predictors and you're not sure which ones matter. Wouldn't it be nice if R just figured it out?
+
+Here's why it doesn't work:
+
+**It exploits chance variation.** Each step in a stepwise procedure involves a significance test. If you run 20 such tests, even at $\alpha = 0.05$, you'd expect one false positive by chance. Stepwise selection is a machine for accumulating false positives.
+
+**The resulting** $p$-values are wrong. The $p$-values attached to coefficients in a stepwise-selected model are not valid. They assume a specific fixed model was chosen before looking at the data. But the model *was* chosen by looking at the data — which means the sampling distribution of the test statistics is different from what the $p$-values assume. Standard errors are underestimated; $p$-values are too small; confidence intervals are too narrow.
+
+**It finds models that don't replicate.** A model selected by stepwise procedure on one dataset often performs poorly on a new dataset drawn from the same population, because it has overfit to the idiosyncrasies of the sample.
+
+**In GLMs, it's worse.** Standard errors in GLMs are already more sensitive to small-sample behavior and model misspecification than OLS standard errors. The Wald tests used in stepwise GLM selection are the same tests that suffer from the Hauck-Donner effect. And because GLM log-likelihoods are more complex surfaces than OLS quadratic forms, the "best" model at each step is more variable — the procedure has more room to go wrong.
+
+::: question
+But I see stepwise selection used all the time in published work. Surely it can't be *that* bad?
+:::
+
+It really is that bad — and the fact that it appears in published work reflects historical practice, not statistical validity. The methodological critique of stepwise selection goes back at least to @harrell2001 and has been reiterated many times since. The American Statistical Association's statement on $p$-values [@wasserstein2016] implicitly condemns the practice by noting that $p$-values should not be used as the basis for model selection.
+
+> <mark>Do not use stepwise selection in any form — forward, backward, or bidirectional — for model building in GLMs or OLS. Choose your model specification on theoretical grounds, use out-of-sample validation or cross-validation if you need to compare specifications empirically, and report uncertainty honestly.</mark>
+
+The alternative is **theory-driven specification**: you should be able to explain, before looking at the data, why each predictor in your model belongs there. If you have genuine uncertainty about which of several theoretically motivated predictors to include, fit all plausible specifications and report sensitivity to those choices using a model comparison table (AIC/BIC, compare_performance()). This is honest; stepwise selection is not.
+
+------------------------------------------------------------------------
+
+## Part V: Convergence and Singular Fits in Mixed Models
+
+Mixed models introduce a new class of problems that have no direct OLS analogue: the optimizer can fail to find a solution, or it can find a solution that's on the boundary of the parameter space — a "singular" fit where one or more estimated variance components are exactly zero.
+
+### Convergence Warnings
+
+When `lme4::glmer()` (or `lmer()`) prints a warning like
+
+```         
+Warning: Model failed to converge with max|grad| = 0.003
+```
+
+it's telling you that the optimization algorithm stopped before reaching a point where the gradient of the log-likelihood was sufficiently close to zero. The estimates you get may be close to the truth, or they may be seriously off — you can't tell from the warning alone.
+
+Common causes:
+
+- **Model too complex for the data**: too many random effects terms relative to the number of groups or observations per group.
+- **Poor scaling of predictors**: variables on very different scales can cause numerical difficulties.
+- **Boundary behavior**: the optimizer is trying to converge near a point where one variance component is being pushed toward zero.
+
+The `performance` package provides a clean check:
+
+```{r convergence-check}
+
+# fit a well-behaved GLMM first
+n.grp.ok  <- 30
+n.per.ok  <- 50
+n.tot.ok  <- n.grp.ok * n.per.ok
+grp.id.ok <- rep(seq_len(n.grp.ok), each = n.per.ok)
+u.ok      <- rnorm(n.grp.ok, 0, 0.8)
+x.ok      <- rnorm(n.tot.ok)
+y.ok      <- rbinom(n.tot.ok, 1,
+                    plogis(-0.3 + 0.7 * x.ok + u.ok[grp.id.ok]))
+ok.df     <- data.frame(y = y.ok, x = x.ok, grp = factor(grp.id.ok))
+
+good.glmm <- lme4::glmer(y ~ x + (1 | grp),
+                          data   = ok.df,
+                          family = binomial)
+
+# check convergence
+performance::check_convergence(good.glmm)
+
+```
+
+When a convergence warning fires, try these fixes in order:
+
+**1. Rescale your predictors.** Standardize continuous predictors (subtract the mean, divide by the standard deviation) and make sure all variables are on comparable scales. This is often enough to resolve convergence warnings.
+
+```{r scale-fix, eval=FALSE}
+
+# standardize predictors before fitting
+ok.df <- ok.df %>%
+  mutate(x.sc = as.numeric(scale(x)))   # z-score transformation
+
+# refit with scaled predictor
+good.glmm.sc <- lme4::glmer(
+  y ~ x.sc + (1 | grp),
+  data   = ok.df,
+  family = binomial
+)
+
+performance::check_convergence(good.glmm.sc)
+
+```
+
+**2. Increase the iteration limit.** Sometimes the algorithm just needs more steps:
+
+```{r iter-fix, eval=FALSE}
+
+# increase max iterations via control argument
+good.glmm.iter <- lme4::glmer(
+  y ~ x + (1 | grp),
+  data    = ok.df,
+  family  = binomial,
+  control = glmerControl(optCtrl = list(maxfun = 2e5))   # 200,000 iterations
+)
+
+```
+
+**3. Try a different optimizer.** `lme4` defaults to `bobyqa`. Sometimes `Nelder_Mead` or the `nlminbwrap` optimizer handles tricky surfaces better:
+
+```{r optimizer-fix, eval=FALSE}
+
+good.glmm.nm <- lme4::glmer(
+  y ~ x + (1 | grp),
+  data    = ok.df,
+  family  = binomial,
+  control = glmerControl(optimizer = "Nelder_Mead")
+)
+
+# the allFit() function from lme4 tries all available optimizers
+# and lets you compare whether the estimates are stable across them
+all.fits <- lme4::allFit(good.glmm)
+summary(all.fits)$fixef   # fixed effects across all optimizers
+
+```
+
+If estimates are consistent across optimizers, the convergence warning is probably a false alarm — the algorithm got close enough and stopped a little early. If estimates vary substantially across optimizers, you have a genuine identification problem and need to simplify the model.
+
+### Singular Fits
+
+A **singular fit** occurs when the optimizer finds a solution that sits on the boundary of the feasible parameter space — most commonly, when a random effect variance is estimated at exactly zero. `lme4` will warn:
+
+```         
+Warning: Model is nearly unidentifiable: very large eigenvalue
+```
+
+or, via `performance`:
+
+```{r singularity}
+
+# fit a GLMM with near-zero random effect variance (our Simulation 4)
+sing.mod <- lme4::glmer(
+  y ~ x + (1 | grp),
+  data   = sing.df,
+  family = binomial
+)
+
+# check for singularity
+performance::check_singularity(sing.mod)
+
+# see the estimated variance components
+lme4::VarCorr(sing.mod)
+
+```
+
+A random effect variance of zero (or very close to zero) means the grouping variable is explaining essentially no between-group variance, given the other terms in the model. This isn't necessarily an error — it might just mean the groups really are homogeneous on the outcome after accounting for your predictors. But it does mean:
+
+1.  The mixed model is providing no practical benefit over a standard GLM — the random effect isn't doing anything.
+2.  The variance estimate at the boundary makes likelihood ratio tests for the random effect invalid (boundary issues make the $\chi^2$ approximation incorrect for testing whether a variance is zero).
+
+::: question
+So if the random effect variance is zero, should I just drop the random effect and fit a regular GLM?
+:::
+
+That depends on why you included the random effect in the first place. If your data genuinely have a clustered structure — students within schools, respondents within states — then the random effect belongs on theoretical grounds, even if its variance estimate is small. Dropping it would ignore a real data feature.
+
+What to do instead:
+
+- **Report the ICC** from the null model. If it's truly near zero, that's an honest and complete description of the situation.
+- **Fit the model both ways** (with and without the random effect) and verify that the fixed-effect estimates are substantively the same. If they are, the random effect structure is inconsequential in practice, and you can report the simpler model as a robustness check.
+- **Consider whether you have enough groups.** The rule of thumb is that reliable estimation of a random intercept requires at least 10–15 groups; random slopes require considerably more. Below this threshold, singular fits are common even when between-group variation genuinely exists.
+
+------------------------------------------------------------------------
+
+## Summary
+
+```{r summary-table, results='asis'}
+
+summ.tbl <- data.frame(
+  Problem = c(
+    "Complete separation",
+    "Quasi-complete separation",
+    "Hauck-Donner effect",
+    "Multicollinearity",
+    "Stepwise selection",
+    "Convergence failure (GLMM)",
+    "Singular fit (GLMM)"
+  ),
+  How_to_detect = c(
+    "Crosstab; `detect_separation()`; huge coefficients + huge SEs",
+    "Empty cells in crosstab; `detect_separation()`; large coefficients",
+    "Large $|\\hat{\\beta}|$ paired with surprisingly small $z$; LRT >> Wald",
+    "`car::vif()` or `performance::check_collinearity()`; VIF > 5",
+    "N/A — don't do it",
+    "`performance::check_convergence()`; optimizer warning in console",
+    "`performance::check_singularity()`; `VarCorr()` shows zero variance"
+  ),
+  What_to_do = c(
+    "Firth's penalized logistic (`brglm2`); Bayesian priors; exact logistic",
+    "Firth; collapse/recode category; acknowledge non-identification",
+    "Use LRT (`drop1(test='Chisq')`) instead of Wald; Firth estimation",
+    "Drop/combine predictors (theory-driven); center before interactions",
+    "Theory-driven specification; out-of-sample validation; compare_performance()",
+    "Scale predictors; more iterations; try other optimizers; allFit()",
+    "Report ICC; compare with/without RE; consider whether groups are sufficient"
+  )
+)
+
+kable(summ.tbl,
+      col.names = c("Problem", "How to detect it", "What to do"),
+      caption   = "Quick reference: pre-estimation and estimation problems in GLMs and GLMMs",
+      escape    = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width        = FALSE) %>%
+  column_spec(1, bold = TRUE)
+
+```
+
+------------------------------------------------------------------------
+
+## References

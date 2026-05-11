@@ -1,0 +1,736 @@
+---
+title: "GLM: Goodness of Fit and Deviance"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+output:
+  bookdown::html_document2:
+    mathjax: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+    number_sections: FALSE
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+    code_folding: show
+    self_contained: true
+    base_format: rmarkdown::html_document
+
+bibliography: site_refs.bib
+csl: gill_apsr.csl
+
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center"
+)
+
+options(scipen = 999)
+options(digits = 4)
+
+```
+
+```{=html}
+<!-- Needs editing for style, tone, and flow. 
+DONE: fix yaml header
+TO DO: 
+- hide big code chunks and add > click 'show' to see ....
+- shorten H1 headers
+- add links to wikipedia definitions where appropriate
+- add some humor, more .question divs, more banter -->
+```
+
+```{css, echo=FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+mark {
+  background-color: LemonChiffon;
+  color: black;
+}
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width: 80%;
+  white-space: nowrap;
+}
+
+```
+
+```{r libs}
+
+P <- c(
+  "knitr",          # rendering
+  "kableExtra",     # table formatting
+  "texreg",         # htmlreg() for model tables
+  "rcompanion",     # nagelkerke() pseudo-R²
+  "performance",    # r2(), compare_performance(), check_predictions()
+  "DHARMa",         # simulation-based PPCs
+  "lmtest",         # lrtest() for likelihood ratio tests
+  "lme4",           # lmer() / glmer() for mixed model examples
+  "MASS",           # glm.nb()
+  "pscl",           # zeroinfl(), vuong()
+  "tidyverse"       # wrangling and ggplot2 — load last
+)
+
+for (pkg in P) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, repos = "http://cran.us.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+
+rm(P, pkg)  # clean up the mess
+
+```
+
+```{r sims}
+
+set.seed(1975)   # for reproducibility
+
+# ── Simulation 1: Binary outcome (logistic regression) ────────────────────────
+# respondents with three predictors: age, education, partisanship (continuous)
+# we'll fit a correct model and a reduced model to compare GOF metrics
+
+n.bin <- 800   # number of observations
+
+age.v    <- round(rnorm(n.bin, mean = 47, sd = 14))        # age in years
+educ.v   <- sample(0:20, n.bin, replace = TRUE)            # years of education
+pid.v    <- rnorm(n.bin, mean = 0, sd = 1)                 # party ID (-3 to 3 scale)
+
+# true linear predictor and outcome
+eta.true <- -1.8 + 0.02 * age.v + 0.07 * educ.v + 0.9 * pid.v
+p.true   <- plogis(eta.true)
+y.vote   <- rbinom(n.bin, size = 1, prob = p.true)         # binary outcome
+
+bin.df <- data.frame(
+  y    = y.vote,
+  age  = age.v,
+  educ = educ.v,
+  pid  = pid.v
+)
+
+# null model (intercept only)
+null.mod <- glm(y ~ 1,
+                family = binomial(link = "logit"),
+                data   = bin.df)
+
+# full model (all three predictors — correctly specified)
+full.mod <- glm(y ~ age + educ + pid,
+                family    = binomial(link = "logit"),
+                data      = bin.df,
+                na.action = na.omit)
+
+# reduced model (omits partisanship — misspecified by omission)
+reduced.mod <- glm(y ~ age + educ,
+                   family    = binomial(link = "logit"),
+                   data      = bin.df,
+                   na.action = na.omit)
+
+# ── Simulation 2: Count outcome with overdispersion ───────────────────────────
+# doctor visits: Poisson underfits (overdispersed), NB fits well
+# used to illustrate GOF for count models
+
+n.ct  <- 500
+
+x.ct  <- rnorm(n.ct)                             # continuous predictor
+mu.ct <- exp(1.2 + 0.6 * x.ct)                  # true conditional mean
+y.ct  <- MASS::rnegbin(n.ct, mu = mu.ct, theta = 1.5)  # overdispersed counts
+
+ct.df <- data.frame(y = y.ct, x = x.ct)
+
+poi.ct <- glm(y ~ x,
+              family = poisson(link = "log"),
+              data   = ct.df)
+
+nb.ct  <- MASS::glm.nb(y ~ x, data = ct.df)
+
+# ── Simulation 3: Clustered binary outcome for mixed model R² ─────────────────
+# citizens nested within countries; random intercept by country
+
+n.ctry   <- 20                                       # number of countries
+n.cit    <- 40                                       # citizens per country
+n.total  <- n.ctry * n.cit
+
+country.id <- rep(seq_len(n.ctry), each = n.cit)    # country membership
+u.ctry     <- rnorm(n.ctry, mean = 0, sd = 1.1)     # country random intercepts
+u.i        <- u.ctry[country.id]                     # expand to observation level
+
+x.ind      <- rnorm(n.total)                          # individual-level predictor
+x.ctry.mn  <- rep(tapply(x.ind, country.id, mean),   # country-mean of x (level 2)
+                  each = n.cit)
+
+eta.mm <- -0.3 + 0.7 * x.ind + 0.5 * x.ctry.mn + u.i
+y.mm   <- rbinom(n.total, 1, plogis(eta.mm))
+
+mm.df <- data.frame(
+  y       = y.mm,
+  x.ind   = x.ind,
+  x.ctry  = x.ctry.mn,
+  country = factor(country.id)
+)
+
+# null GLMM (random intercept only — for ICC)
+null.glmm <- lme4::glmer(
+  y ~ 1 + (1 | country),
+  data   = mm.df,
+  family = binomial(link = "logit")
+)
+
+# full GLMM
+full.glmm <- lme4::glmer(
+  y ~ x.ind + x.ctry + (1 | country),
+  data   = mm.df,
+  family = binomial(link = "logit")
+)
+
+```
+
+------------------------------------------------------------------------
+
+## Introduction
+
+In ordinary least squares regression, you get an $R^2$ at the bottom of every output table, and interpreting it is second nature: it's the proportion of variance in $Y$ explained by the model, and it ranges from 0 to 1. You know what a "good" $R^2$ looks like for your field. You know how to compare two models using it.
+
+Generalized linear models take all of that away.
+
+Because GLMs don't minimize a sum of squared residuals, there's no natural $R^2$. Because they use maximum likelihood estimation, the notion of "explained variance" doesn't cleanly apply. And because different model families have different distributional scales, you can't even compare a goodness-of-fit metric across a logistic regression and a Poisson model the way you'd compare $R^2$ across two OLS models.
+
+What GLMs *do* have is **deviance** — and once you understand what deviance is and where it comes from, most of the goodness-of-fit apparatus for GLMs falls into place. This page works through deviance carefully, then covers the pseudo-$R^2$ statistics that borrow deviance's logic, the information criteria and likelihood ratio tests used for model comparison, posterior predictive checks, and finally how all of this changes (a little) for mixed models.
+
+------------------------------------------------------------------------
+
+## Part I: Deviance — The GLM's Answer to RSS
+
+### The Three Models
+
+To understand deviance, you need to hold three models in your head simultaneously. This sounds complicated, but the intuition is simple.
+
+**The null model** has only an intercept. It says the outcome doesn't depend on any of the predictors at all — everyone has the same predicted value. This is the worst plausible model you'd seriously entertain. Its log-likelihood is $\ell(\hat{\boldsymbol{\beta}}_0)$ where $\hat{\boldsymbol{\beta}}_0$ is just the intercept.
+
+**The saturated model** has one parameter per observation. It fits the data perfectly — every predicted value equals the observed value. Its log-likelihood, $\ell_{\text{sat}}$, is the theoretical maximum achievable. This model is useless for prediction (it has $n$ parameters and $n$ data points), but it provides a ceiling against which we can measure other models.
+
+**The fitted model** is somewhere in between: it has $k$ parameters ($k \ll n$) and achieves a log-likelihood $\ell(\hat{\boldsymbol{\beta}})$ somewhere between the null and the saturated.
+
+The **deviance** of the fitted model is defined as the log-likelihood ratio comparing it to the saturated model, scaled by $-2$:
+
+$$D = -2\left[\ell(\hat{\boldsymbol{\beta}}) - \ell_{\text{sat}}\right]$$
+
+Larger deviance means the fitted model is further from the saturated model — in other words, a worse fit.[^1] A deviance of zero would mean the fitted model *is* the saturated model, which would be a sign of terrible overfitting, not good fit.
+
+[^1]: Notice the sign convention. The log-likelihood is always negative (or zero), and $\ell_{\text{sat}} \geq \ell(\hat{\boldsymbol{\beta}})$ always, so $D \geq 0$. Under the null hypothesis that the fitted model is correctly specified, $D$ is asymptotically distributed as $\chi^2$ with degrees of freedom equal to the difference in the number of parameters between the saturated and fitted models — i.e., $n - k$.
+
+The analogy with OLS is helpful here. In OLS, the residual sum of squares (RSS) measures how much the fitted model fails to account for variance in $Y$. Deviance plays the same role in a GLM: it measures how much the fitted model fails to account for the information in $Y$, but in likelihood terms rather than squared-error terms. <mark>Deviance is the GLM's residual sum of squares — just measured on the log-likelihood scale instead of the squared-error scale.</mark>
+
+### Null Deviance, Residual Deviance, and the G Statistic
+
+R's `glm()` output reports two deviance values: the **null deviance** (deviance of the null model relative to the saturated model) and the **residual deviance** (deviance of the fitted model relative to the saturated model):
+
+$$D_{\text{null}} = -2\left[\ell(\hat{\boldsymbol{\beta}}_0) - \ell_{\text{sat}}\right]$$ $$D_{\text{resid}} = -2\left[\ell(\hat{\boldsymbol{\beta}}) - \ell_{\text{sat}}\right]$$
+
+The difference between these two is $G$, the likelihood ratio test statistic for the overall model:
+
+$$G = D_{\text{null}} - D_{\text{resid}} = -2\left[\ell(\hat{\boldsymbol{\beta}}_0) - \ell(\hat{\boldsymbol{\beta}})\right]$$
+
+Under $H_0$ (the null model is correct), $G \sim \chi^2_k$ where $k$ is the number of parameters added relative to the null. A large $G$ — and a small $p$-value — means the model with predictors fits significantly better than the null. This is the GLM's answer to the overall $F$-test in OLS.
+
+```{r deviance-demo, results='asis'}
+
+# look at the raw model output to see deviance directly
+summary(full.mod)
+
+```
+
+```{r g-statistic}
+
+# compute G manually from the model object
+G.stat <- full.mod$null.deviance - full.mod$deviance
+G.df   <- full.mod$df.null - full.mod$df.residual
+
+cat("Null deviance:    ", round(full.mod$null.deviance, 2), "\n")
+cat("Residual deviance:", round(full.mod$deviance, 2),      "\n")
+cat("G statistic:      ", round(G.stat, 2),
+    "on", G.df, "df\n")
+cat("p-value:          ", format.pval(pchisq(G.stat, G.df, lower.tail = FALSE),
+                                       digits = 4), "\n")
+
+```
+
+```{r anova-chisq}
+
+# equivalently: use anova() with a chi-squared test
+# compares the fitted model to the null model
+anova(full.mod, null.mod, test = "Chisq")
+
+```
+
+The $G$ statistic tells us whether our predictors collectively improve fit. It doesn't tell us how *much* they improve it — for that, we need pseudo-$R^2$ statistics.
+
+::: question
+OK so deviance is basically the GLM's RSS, and $G$ is the GLM's $F$-test. Got it. So is there a GLM version of $R^2$?
+:::
+
+Sort of. There are several proposals, all of them flawed in different ways — which is why the literature calls them "pseudo-$R^2$" rather than the real thing. Let's go through the most important ones.
+
+------------------------------------------------------------------------
+
+## Part II: Pseudo-$R^2$ Statistics
+
+### McFadden's $R^2$
+
+The most commonly reported pseudo-$R^2$ is McFadden's, which uses the ratio of model deviance to null deviance:[^2]
+
+[^2]: McFadden originally proposed this in the context of discrete choice models, not GLMs generally. The formula extends naturally to any likelihood-based model. The "proportion of log-likelihood explained" interpretation is the most accurate way to describe it — it's not a proportion of variance, despite what some textbook descriptions imply.
+
+$$R^2_{\text{McF}} = 1 - \frac{D_{\text{resid}}}{D_{\text{null}}} = 1 - \frac{\ell(\hat{\boldsymbol{\beta}})}{\ell(\hat{\boldsymbol{\beta}}_0)}$$
+
+The intuition is clean: if the fitted model is no better than the null, $D_{\text{resid}} = D_{\text{null}}$ and $R^2_{\text{McF}} = 0$. If the fitted model is perfect (equals the saturated model), $D_{\text{resid}} = 0$ and $R^2_{\text{McF}} = 1$. In practice, values of 0.2–0.4 are often described as indicating "good model fit" for binary logistic regression — but this benchmark varies by field and context, and McFadden himself cautioned against interpreting these values the way one would interpret an OLS $R^2$.
+
+### Cox & Snell and Nagelkerke
+
+The Cox & Snell $R^2$ uses the likelihood ratio in a slightly different way:
+
+$$R^2_{\text{CS}} = 1 - \left(\frac{L_0}{L_M}\right)^{2/n}$$
+
+where $L_0$ and $L_M$ are the likelihoods (not log-likelihoods) of the null and fitted models. The trouble with Cox & Snell is that it can never reach 1.0 for discrete-outcome models, because the saturated model's likelihood for discrete data is always less than 1. The **Nagelkerke** $R^2$ corrects this by dividing by the maximum possible value of $R^2_{\text{CS}}$:
+
+$$R^2_{\text{N}} = \frac{R^2_{\text{CS}}}{R^2_{\text{CS, max}}}$$
+
+This guarantees a range of $[0, 1]$, which makes it more comparable to OLS $R^2$ in that superficial sense. It's still not a proportion of variance, but it's frequently reported in applied political science work.
+
+### Tjur's $R^2$ for Binary Models
+
+For *binary* logistic regression specifically, @tjur2009 proposed a beautifully simple alternative: compute the difference between the mean predicted probability among observations where $Y = 1$ and the mean predicted probability among observations where $Y = 0$:
+
+$$R^2_{\text{Tjur}} = \bar{\hat{p}}_{Y=1} - \bar{\hat{p}}_{Y=0}$$
+
+A model with no discriminatory power gives predicted probabilities that are equal on average for successes and failures, so $R^2_{\text{Tjur}} = 0$. A perfect model gives $\bar{\hat{p}}_{Y=1} = 1$ and $\bar{\hat{p}}_{Y=0} = 0$, so $R^2_{\text{Tjur}} = 1$. This measure has a natural interpretation as the model's ability to *discriminate* between the two outcome classes.
+
+### Computing Pseudo-$R^2$ in R
+
+The `performance` package's `r2()` function is the most convenient tool, as it returns the appropriate pseudo-$R^2$ type automatically based on the model class:
+
+```{r pseudoR2-performance}
+
+# r2() returns the most appropriate pseudo-R² for the model type
+# for glm with binomial family: returns Tjur's R² and Cox & Snell / Nagelkerke
+r2(full.mod)
+r2(reduced.mod)
+
+```
+
+For a more complete set including McFadden's, use `rcompanion::nagelkerke()`:
+
+```{r pseudoR2-nagelkerke}
+
+# nagelkerke() returns McFadden, Cox & Snell, and Nagelkerke
+full.rsq    <- rcompanion::nagelkerke(full.mod,     null = null.mod)
+reduced.rsq <- rcompanion::nagelkerke(reduced.mod,  null = null.mod)
+
+# display side by side
+rsq.compare <- data.frame(
+  Measure  = c("McFadden", "Cox & Snell", "Nagelkerke"),
+  Full     = round(full.rsq$Pseudo.R.squared.for.model.vs.null, 3),
+  Reduced  = round(reduced.rsq$Pseudo.R.squared.for.model.vs.null, 3)
+)
+
+kable(rsq.compare,
+      col.names = c("Pseudo-R²", "Full Model", "Reduced Model"),
+      caption   = "Pseudo-R² comparison: full vs. reduced model") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+```
+
+::: question
+Which pseudo-$R^2$ should I actually report in a paper?
+:::
+
+It depends on your model type and your audience's expectations. A few rules of thumb:
+
+- For **binary logistic regression**, Tjur's $R^2$ is the most interpretable and least misleading. McFadden's is the most widely reported. Nagelkerke is common in public health and some social science subfields. If in doubt, report both McFadden and Tjur's, note that they can't be directly compared to OLS $R^2$, and let the effect plots do the heavy lifting.
+- For **count models** and **ordinal models**, McFadden's (or a variant) is the most common choice, though the `gofcat` package provides model-specific pseudo-$R^2$ measures (e.g., Ugba & Gertheiss for ordinal logit).
+- **Never** report pseudo-$R^2$ as a standalone measure of model quality. Use it alongside AIC/BIC, the $G$ statistic, and a substantive discussion of effect sizes and predictions.
+
+> <mark>Pseudo-$R^2$ statistics are descriptive summaries of relative fit, not measures of explained variance. They cannot be meaningfully compared across different distributional families (e.g., a logit model vs. a Poisson model), and they should never be interpreted the way OLS $R^2$ is interpreted.</mark>
+
+------------------------------------------------------------------------
+
+## Part III: Information Criteria and Model Comparison
+
+### AIC and BIC
+
+For comparing models — whether nested or not — the most reliable general tools are the **Akaike Information Criterion (AIC)** and the **Bayesian Information Criterion (BIC)**:
+
+$$\text{AIC} = -2\ell(\hat{\boldsymbol{\beta}}) + 2k$$ $$\text{BIC} = -2\ell(\hat{\boldsymbol{\beta}}) + k\ln(n)$$
+
+In both cases, $k$ is the number of estimated parameters and $n$ is the sample size. Lower values are better. Both penalize model complexity — AIC with a flat penalty of 2 per parameter, BIC with a penalty that grows with sample size. This means BIC more strongly favors parsimonious models, especially in large samples.
+
+::: question
+What if AIC and BIC point to different models? Which one wins?
+:::
+
+Neither "wins" — they're asking slightly different questions. AIC is motivated by minimizing prediction error on new data; it selects the model that would generalize best if you collected more data from the same process. BIC is motivated by identifying the true data-generating model; it selects the model most likely to be "correct" in a Bayesian sense. In large samples, BIC will favor simpler models than AIC.
+
+If they disagree, think about your goal. If you're building a predictive model, lean toward AIC. If you're trying to identify a parsimonious causal structure, lean toward BIC. If they disagree dramatically, that's itself interesting — it usually means the data don't strongly favor one level of complexity over another, and that your uncertainty about model selection should be honestly communicated.
+
+```{r aic-bic}
+
+# AIC and BIC are available directly from the model object
+cat("Full model    — AIC:", round(AIC(full.mod), 2),
+                  " BIC:", round(BIC(full.mod), 2), "\n")
+cat("Reduced model — AIC:", round(AIC(reduced.mod), 2),
+                  " BIC:", round(BIC(reduced.mod), 2), "\n")
+cat("Null model    — AIC:", round(AIC(null.mod), 2),
+                  " BIC:", round(BIC(null.mod), 2), "\n")
+
+```
+
+### Likelihood Ratio Tests for Nested Models
+
+When two models are **nested** — one is a special case of the other, obtained by constraining some parameters to zero — the likelihood ratio test (LRT) is the preferred comparison tool. The test statistic is:
+
+$$G = -2\left[\ell(\hat{\boldsymbol{\beta}}_{\text{restricted}}) - \ell(\hat{\boldsymbol{\beta}}_{\text{full}})\right]$$
+
+which is distributed as $\chi^2$ with degrees of freedom equal to the number of constraints (i.e., the number of parameters dropped). In R, `lmtest::lrtest()` is the cleanest implementation:
+
+```{r lrt}
+
+# LRT: full model vs. reduced (reduced is nested in full — pid is constrained to 0)
+lmtest::lrtest(reduced.mod, full.mod)
+
+```
+
+The significant result confirms that the full model (with partisanship) fits significantly better than the reduced model — consistent with how we simulated the data.
+
+You can also use base R's `anova()` with `test = "Chisq"`:
+
+```{r anova-nested}
+
+# base R version — identical result
+anova(reduced.mod, full.mod, test = "Chisq")
+
+```
+
+### Comparing Models with `performance`
+
+For a clean side-by-side comparison of multiple models across several metrics at once, `performance::compare_performance()` is excellent:
+
+```{r compare-performance, results='asis'}
+
+# compare all three models at once
+# returns AIC, BIC, R², and other metrics depending on model type
+perf.comp <- performance::compare_performance(
+  null.mod, reduced.mod, full.mod,
+  metrics = c("AIC", "BIC", "R2_Tjur", "RMSE")
+)
+
+# display as table
+kable(as.data.frame(perf.comp),
+      digits  = 3,
+      caption = "Model performance comparison") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+```
+
+For count models, the same tools apply. Let's see what happens when we compare a Poisson model to a negative binomial on overdispersed data:
+
+```{r count-comparison, results='asis'}
+
+# compare Poisson vs. NB on the overdispersed count data
+performance::compare_performance(
+  poi.ct, nb.ct,
+  metrics = c("AIC", "BIC", "RMSE")
+) %>%
+  as.data.frame() %>%
+  kable(digits  = 3,
+        caption = "Poisson vs. Negative Binomial: model comparison") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+```
+
+The NB model should show substantially lower AIC and BIC, since it was the true data-generating process. The difference here is not subtle — overdispersion, when present, makes the Poisson look bad by any metric.
+
+------------------------------------------------------------------------
+
+## Part IV: Posterior Predictive Checks
+
+Information criteria and LRTs tell you which model fits *relatively* better. They don't tell you whether any of the competing models fits the data *adequately* in an absolute sense. For that, we need **posterior predictive checks** (PPCs).
+
+The idea is straightforward: if your model is a good description of reality, then data generated from the model should look similar to data you actually collected. A PPC works by:
+
+1.  Simulating many datasets from the fitted model.
+2.  Comparing those simulated datasets to the observed data on some summary statistic (the mean, the variance, the distribution shape, the proportion of zeros, etc.).
+3.  Asking: does the observed statistic fall within the range of what the model predicts?
+
+If the observed data are a systematic outlier relative to the simulated data, the model is mis-specified in a way that matters for the summary you chose.
+
+### `performance::check_predictions()`
+
+The `performance` package implements a PPC using the model's distributional family to generate simulated datasets:
+
+```{r ppc-full}
+#| fig.cap: "Posterior predictive check for the full logistic model. The dark line is the density of the observed data; the lighter lines are densities from 50 simulated datasets. If the model fits well, the observed density should fall within the envelope of simulated densities."
+
+# PPC for the binary logistic model
+# plots the density of the observed data against the range of simulated densities
+performance::check_predictions(full.mod, iterations = 100)
+
+```
+
+```{r ppc-poi}
+#| fig.cap: "Posterior predictive check for the Poisson count model. The observed distribution (dark line) falls well outside the simulated envelope, indicating systematic misfit — consistent with the overdispersion we built into the data."
+
+# PPC for the misspecified Poisson model
+# the observed count distribution is more spread out than the Poisson predicts
+performance::check_predictions(poi.ct, iterations = 100)
+
+```
+
+The Poisson PPC is revealing: the model's simulated distributions are too narrow compared to the observed data. This is the visual signature of overdispersion — the real data have more variance than the Poisson distribution can accommodate.
+
+### DHARMa as a Formal PPC
+
+DHARMa's `testUniformity()` is essentially a formal PPC for the entire residual distribution. If the model is correctly specified, the quantile residuals should be uniform — and the KS test catches systematic departures from that uniformity:
+
+```{r dharma-ppc, cache=TRUE}
+
+# simulate DHARMa residuals for the Poisson model
+sim.poi <- DHARMa::simulateResiduals(poi.ct, n = 500, plot = FALSE)
+
+# testUniformity: KS test + plot
+DHARMa::testUniformity(sim.poi,
+                        alternative = "two.sided",
+                        plot = TRUE)
+
+```
+
+A significant KS test, combined with a PPC that shows systematic mismatch, is strong evidence of model misfit. In this case, both the `check_predictions()` plot and the DHARMa test converge on the same conclusion: the Poisson model is not adequate for these data.
+
+------------------------------------------------------------------------
+
+## Part V: The Hosmer-Lemeshow Test (and Why to Use It Carefully)
+
+For binary logistic regression, the **Hosmer-Lemeshow (HL) test** has historically been the most-reported formal GOF test. It works by grouping observations into $g$ bins based on their predicted probabilities (usually $g = 10$ deciles), computing observed and expected counts within each bin, and running a $\chi^2$ test on the discrepancy:
+
+$$C = \sum_{j=1}^{g} \frac{(O_j - E_j)^2}{E_j}$$
+
+The null hypothesis is good fit. A significant result indicates poor fit in the sense that observed and expected counts differ substantially across some bins.
+
+```{r hosmer-lemeshow}
+
+# Hosmer-Lemeshow test via the performance package
+performance::performance_hosmer(full.mod, n_bins = 10)
+
+```
+
+::: question
+The Hosmer-Lemeshow test is in every GLM textbook I've read. Are you seriously saying I shouldn't use it?
+:::
+
+I'm saying use it *carefully* — with a clear understanding of its limitations. The HL test has several well-documented problems:
+
+**It's sensitive to the number of bins.** The $p$-value can change substantially depending on whether you use 8 or 10 or 12 groups. This makes the test results difficult to replicate and compare.
+
+**It has low power.** The test often fails to reject a null hypothesis of good fit even when the model is substantially misspecified, particularly in small samples.
+
+**It doesn't penalize overfitting.** A model with too many parameters can produce low predicted probabilities that are spread thinly across bins, making the test nearly impossible to reject.
+
+**In large samples, it rejects too easily.** With enough data, even trivially small and substantively meaningless deviations from perfect fit will be detected.
+
+For all of these reasons, current best practice is to rely primarily on **posterior predictive checks** (Part IV above) and **DHARMa-based tests**, and to treat the HL test as supplementary context rather than the main evidence of fit. If your reviewers ask for it, report it — but don't let it substitute for a more comprehensive assessment.
+
+> The Hosmer-Lemeshow test was state-of-the-art in the 1980s. It remains useful as a quick sanity check, but it should not be the primary basis for evaluating a logistic regression's fit in contemporary applied work.
+
+------------------------------------------------------------------------
+
+## Part VI: Goodness of Fit in Mixed Models
+
+Mixed models add complexity to every aspect of fit assessment. The core issue is that there are now *two levels* at which we can ask "how well does the model fit?" — the within-group level (how well do we predict individual observations?) and the between-group level (how well do the model's predictions capture group-level patterns?). This distinction drives everything in this section.
+
+### Marginal vs. Conditional $R^2$
+
+@nakagawa2013 proposed a framework for $R^2$ in mixed models that captures this two-level distinction. The **marginal** $R^2$ ($R^2_m$) captures the variance explained by the *fixed effects alone* — it answers the question "how much of the variance in $Y$ is explained by our predictors, ignoring the clustering structure?"
+
+The **conditional** $R^2$ ($R^2_c$) captures the variance explained by *both fixed and random effects* — it answers the question "how much of the variance in $Y$ is explained by our full model, including the group-level structure?"
+
+$$R^2_c \geq R^2_m \quad \text{always}$$
+
+The gap between them is informative: a large gap means the random effects are explaining a substantial amount of variance that the fixed effects alone don't capture. A small gap means the group structure adds little once the individual-level predictors are accounted for.
+
+```{r mixed-r2}
+
+# performance::r2() returns both marginal and conditional R² for lme4 objects
+r2(full.glmm)
+
+```
+
+```{r mixed-r2-table}
+
+# examine how the random effect contributes to fit
+r2.null <- r2(null.glmm)
+r2.full <- r2(full.glmm)
+
+r2.tbl <- data.frame(
+  Model       = c("Null (intercept + RE only)", "Full (predictors + RE)"),
+  R2_marginal = c(NA, round(r2.full$R2_marginal, 3)),
+  R2_cond     = c(round(r2.null$R2_conditional, 3),
+                  round(r2.full$R2_conditional, 3))
+)
+
+kable(r2.tbl,
+      col.names = c("Model", "R² (marginal)", "R² (conditional)"),
+      caption   = "Marginal and conditional R² for mixed models",
+      na = "—") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+```
+
+In the null model (no predictors), the marginal $R^2$ is undefined (or zero), because there are no fixed predictors. The conditional $R^2$ from the null model is equivalent to the ICC — it tells you how much variance is accounted for by group membership alone.[^3]
+
+[^3]: This is why reporting the ICC from the null model alongside the marginal and conditional $R^2$ from the full model gives a coherent narrative: the ICC tells you how much clustering matters in the raw data; the difference between $R^2_m$ and $R^2_c$ tells you how much the random effects contribute on top of your fixed predictors.
+
+### AIC and BIC for Mixed Models
+
+AIC and BIC work for mixed models estimated via maximum likelihood (`REML = FALSE` in `lmer()`), but there's an important caveat: **models estimated with REML (restricted maximum likelihood) cannot be compared using likelihood-based criteria** if they differ in their fixed effects structure.
+
+```{r mixed-aic, eval=FALSE}
+
+# for comparing models with different fixed effects:
+# refit with REML = FALSE (ML estimation) first
+# lmer() uses REML by default; glmer() uses ML by default
+
+# for glmer objects (used in our GLMM), ML is the default — AIC/BIC are valid
+AIC(null.glmm, full.glmm)
+BIC(null.glmm, full.glmm)
+
+# for random effects structure comparisons (same fixed effects, different RE):
+# REML is appropriate — use as estimated
+# compare with anova() or lrtest()
+lmtest::lrtest(null.glmm, full.glmm)
+
+```
+
+### The ICC Revisited as a Fit Metric
+
+The **intraclass correlation coefficient** (ICC) from the null model deserves a brief reprise in the context of fit, because it's one of the most substantively meaningful summaries of how well a mixed model is warranted by the data.[^4]
+
+[^4]: The ICC is covered in more depth in the companion page on mixed model diagnostics. Here, we're treating it as a fit metric rather than a diagnostic.
+
+For a binary GLMM, using the latent variable approach:
+
+$$\text{ICC} = \frac{\tau_{00}}{\tau_{00} + \pi^2/3}$$
+
+```{r icc-fit}
+
+# extract between-group variance from the null GLMM
+tau00 <- as.numeric(VarCorr(null.glmm)$country)
+
+# ICC via latent variable formula (binary model)
+icc.val <- tau00 / (tau00 + pi^2 / 3)
+
+cat("Between-group variance (tau_00):", round(tau00, 4), "\n")
+cat("ICC:                            ", round(icc.val, 3), "\n")
+
+# performance::icc() does the same thing (cleaner output)
+performance::icc(null.glmm)
+
+```
+
+An ICC of, say, 0.28 means that 28% of the total variance in the outcome is explained by country membership alone, before we've added any individual-level predictors. That's a strong justification for the mixed model approach — ignoring that clustering would give badly wrong standard errors. An ICC near zero means the grouping variable isn't doing much, and a simpler model might be sufficient.
+
+------------------------------------------------------------------------
+
+## Summary
+
+```{r summary-table, results='asis'}
+
+summ.tbl <- data.frame(
+  Tool = c(
+    "Null & residual deviance",
+    "G statistic (LR test vs. null)",
+    "McFadden's R²",
+    "Tjur's R² (binary only)",
+    "Nagelkerke R²",
+    "AIC / BIC",
+    "LR test (lrtest())",
+    "compare_performance()",
+    "check_predictions() (PPC)",
+    "DHARMa testUniformity()",
+    "Hosmer-Lemeshow test",
+    "Marginal / Conditional R² (mixed)",
+    "ICC (mixed)"
+  ),
+  Use_for = c(
+    "Understanding overall model fit on the likelihood scale",
+    "Overall significance: do any predictors help?",
+    "Relative fit; proportion of log-likelihood explained",
+    "Discrimination ability in binary models; easy to interpret",
+    "Relative fit; comparable to R² in scale (not meaning)",
+    "Comparing nested or non-nested models; model selection",
+    "Formal test for nested model comparison",
+    "Side-by-side comparison across multiple models",
+    "Absolute fit: does the model reproduce the data distribution?",
+    "Formal PPC: are residuals uniform under the model?",
+    "Historical GOF test for logistic regression; use cautiously",
+    "Variance explained at fixed-effects and full-model levels",
+    "Justification for mixed model; clustering strength"
+  ),
+  Key_function = c(
+    "`glm()$deviance`, `glm()$null.deviance`",
+    "`anova(m0, m1, test='Chisq')`",
+    "`rcompanion::nagelkerke()`",
+    "`performance::r2()`",
+    "`rcompanion::nagelkerke()`",
+    "`AIC()`, `BIC()`",
+    "`lmtest::lrtest()`",
+    "`performance::compare_performance()`",
+    "`performance::check_predictions()`",
+    "`DHARMa::testUniformity()`",
+    "`performance::performance_hosmer()`",
+    "`performance::r2()` on lme4 object",
+    "`performance::icc()`"
+  )
+)
+
+kable(summ.tbl,
+      col.names = c("Tool", "Use it for", "Key R function"),
+      caption   = "Quick reference: goodness-of-fit tools for GLMs and GLMMs") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE)
+
+```
+
+A note on workflow: the tools in this table are complementary, not redundant. In a real analysis, you'll use them in sequence — deviance and $G$ to establish that your predictors collectively matter, AIC/BIC or LRT to compare competing specifications, pseudo-$R^2$ for a descriptive summary, and PPCs to check whether the model is adequate in an absolute sense. Don't pick one and ignore the rest.
+
+------------------------------------------------------------------------
+
+## References

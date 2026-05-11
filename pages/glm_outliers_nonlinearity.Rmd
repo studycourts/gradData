@@ -1,0 +1,747 @@
+---
+title: "GLM: Outliers and Nonlinearity"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+output:
+  bookdown::html_document2:
+    mathjax: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+    number_sections: FALSE
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+    code_folding: show
+    self_contained: true
+    base_format: rmarkdown::html_document
+
+bibliography: site_refs.bib
+csl: gill_apsr.csl
+
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center"
+)
+
+options(scipen = 999)
+options(digits = 4)
+
+```
+
+```{=html}
+<!-- Needs editing for tone, flow, clarity.
+DONE: fix yaml header
+TODO:
+- hide big code chunks and add blockquote > click 'show' to see ...
+- shorten the H1 headings
+- tighten up the code annotations
+- add more transitions, explanations, and interpretations in the text
+- add more .question divs, more humor, more banter
+- add wikipedia links where appropriate
+-->
+```
+
+```{css, echo=FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+mark {
+  background-color: LemonChiffon;
+  color: black;
+}
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width: 80%;
+  white-space: nowrap;
+}
+
+```
+
+```{r libs}
+
+P <- c(
+  "knitr",          # rendering
+  "kableExtra",     # table formatting
+  "statmod",        # quantile residuals
+  "DHARMa",         # simulation-based residuals and outlier tests
+  "performance",    # check_outliers(), check_model()
+  "car",            # crPlots(), outlierTest()
+  "lme4",           # glmer() for GLMM examples
+  "MASS",           # glm.nb()
+  "mgcv",           # gam() for splines / nonlinearity detection
+  "splines",        # ns() for natural splines
+  "patchwork",      # combining ggplots
+  "tidyverse"       # wrangling and ggplot2 — load last
+)
+
+for (pkg in P) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, repos = "http://cran.us.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+
+rm(P, pkg)  # clean up the mess
+
+```
+
+```{r sims}
+
+set.seed(1975)   # for reproducibility
+
+# ── Simulation 1: Binary logistic with a genuine outlier ─────────────────────
+# one observation has an extreme predictor value and an unexpected outcome
+# this observation will have high influence on the coefficients
+
+n.bin <- 500
+
+x1.bin <- rnorm(n.bin)                              # first predictor
+x2.bin <- rnorm(n.bin)                              # second predictor
+
+eta.bin <- -0.5 + 1.2 * x1.bin + 0.7 * x2.bin     # true linear predictor
+y.bin   <- rbinom(n.bin, 1, plogis(eta.bin))        # binary outcome
+
+# inject one high-leverage outlier: extreme x1, unexpected outcome
+x1.bin[1] <- 4.5                                    # very high x1 value
+y.bin[1]  <- 0                                      # unexpected outcome (should be 1)
+
+bin.df <- data.frame(y = y.bin, x1 = x1.bin, x2 = x2.bin)
+
+# fit binary logit with and without the outlier
+logit.full    <- glm(y ~ x1 + x2,
+                     family    = binomial(link = "logit"),
+                     data      = bin.df,
+                     na.action = na.omit)
+
+logit.dropped <- glm(y ~ x1 + x2,
+                     family    = binomial(link = "logit"),
+                     data      = bin.df[-1, ],
+                     na.action = na.omit)
+
+# ── Simulation 2: Poisson count with nonlinearity ─────────────────────────────
+# the true relationship is quadratic in x1 but we fit a linear model first
+# used to show how quantile residuals and GAMs detect nonlinearity
+
+n.poi <- 600
+
+x1.poi <- rnorm(n.poi, mean = 0, sd = 1.2)          # continuous predictor 1
+x2.poi <- rnorm(n.poi, mean = 0, sd = 1.0)          # continuous predictor 2
+
+# true linear predictor includes a quadratic in x1
+eta.poi <- 1.5 + 0.3 * x1.poi - 0.4 * x1.poi^2 - 0.2 * x2.poi
+y.poi   <- rpois(n.poi, lambda = exp(eta.poi))
+
+poi.df <- data.frame(y = y.poi, x1 = x1.poi, x2 = x2.poi)
+
+# misspecified model: omits x1^2
+poi.linear <- glm(y ~ x1 + x2,
+                  family = poisson(link = "log"),
+                  data   = poi.df)
+
+# correctly specified model: includes x1^2
+poi.quad <- glm(y ~ x1 + I(x1^2) + x2,
+                family = poisson(link = "log"),
+                data   = poi.df)
+
+# ── Simulation 3: Negative binomial with a nonlinear and outlier-contaminated
+#    predictor — shows how outliers can masquerade as nonlinearity
+
+n.nb <- 400
+
+x.nb  <- rnorm(n.nb)
+mu.nb <- exp(1.0 + 0.8 * x.nb)
+y.nb  <- MASS::rnegbin(n.nb, mu = mu.nb, theta = 2)
+
+# inject two high-leverage count outliers
+y.nb[c(5, 10)] <- y.nb[c(5, 10)] * 15              # inflate two counts dramatically
+
+nb.df <- data.frame(y = y.nb, x = x.nb)
+
+nb.mod <- MASS::glm.nb(y ~ x, data = nb.df)
+
+# ── Simulation 4: Clustered data — binary GLMM for LOO influence ─────────────
+
+n.grp  <- 20
+n.per  <- 30
+n.tot  <- n.grp * n.per
+
+grp.id <- rep(seq_len(n.grp), each = n.per)
+u.j    <- rnorm(n.grp, 0, 0.7)
+x.glmm <- rnorm(n.tot)
+y.glmm <- rbinom(n.tot, 1,
+                 plogis(-0.3 + 0.9 * x.glmm + u.j[grp.id]))
+
+# inject a suspicious group: one group's outcomes are all flipped
+y.glmm[grp.id == 1] <- 1 - y.glmm[grp.id == 1]
+
+glmm.df  <- data.frame(y = y.glmm, x = x.glmm, grp = factor(grp.id))
+
+glmm.mod <- lme4::glmer(
+  y ~ x + (1 | grp),
+  data   = glmm.df,
+  family = binomial
+)
+
+```
+
+------------------------------------------------------------------------
+
+## Introduction
+
+Outliers and nonlinearity are two of the most common sources of model misfit in applied work, and in GLMs they have an interesting relationship: each can make the other harder to detect. An outlier at an extreme predictor value can pull a coefficient estimate in a direction that makes the fit look curved when it isn't. Conversely, genuine nonlinearity in a predictor can produce a cluster of residuals with the same pattern as a group of outliers. Working through these two problems together, and understanding how they interact, is more useful than treating them as separate checklist items.
+
+This page covers outlier detection and influence analysis first, then turns to nonlinearity. It emphasizes **quantile residuals** and **DHARMa simulation-based diagnostics** throughout — the same tools introduced in the [residuals page](residuals.html). If you haven't read that page yet, the key point to carry into this one is: for non-Gaussian GLMs, standard Pearson and deviance residuals are not reliable for detecting either outliers or nonlinear patterns, because their distributions are not normal even under a well-specified model. Quantile residuals solve this.
+
+------------------------------------------------------------------------
+
+## Part I: What Is an Outlier in a GLM?
+
+In OLS, we distinguish between three kinds of problematic observations:
+
+- **Outliers** in $Y$: observations whose response value is far from what the model predicts. In the residual plot, they sit far from zero on the $y$-axis.
+- **Leverage points**: observations with extreme values on one or more predictors — far from the center of the $\mathbf{X}$ space. In a regression line analogy, they sit at the end of the lever. High leverage doesn't necessarily cause bias, but it means the observation *could* be influential.
+- **Influential observations**: observations that, when removed, cause a substantial change in the estimated coefficients. An influential observation is typically one that combines high leverage with an unexpected response — it's sitting at the end of the lever *and* pulling it in an unusual direction.
+
+These three concepts carry over to GLMs almost unchanged. The algebra for computing leverage and Cook's D is a little different (it involves the weighted hat matrix from IRWLS rather than the ordinary hat matrix), but the interpretation is identical. And the same diagnostic principle applies: <mark>an observation is concerning not because it has an extreme predictor value, nor because its residual is large, but because removing it substantially changes what the model tells you about the world.</mark>
+
+------------------------------------------------------------------------
+
+## Part II: Detecting Outliers and Influential Observations
+
+### Quantile Residuals: The Right Starting Point
+
+Because the distribution of traditional GLM residuals is non-normal for binary and count outcomes, a QQ plot of Pearson or deviance residuals will look alarming even under a correctly specified model. **Quantile residuals** [@dunnSmyth1996] fix this: under a correctly specified model, they are exactly $N(0,1)$, making a QQ plot a reliable tool for detecting genuine outliers.
+
+```{r qr-outlier-detect}
+#| fig.cap: "Quantile residual QQ plot for the binary logistic model with an injected outlier. The single point deviating sharply from the reference line in the upper right is the injected outlier — observation 1."
+
+# analytical quantile residuals for the binary logit
+qr.logit <- statmod::qresid(logit.full)
+
+# QQ plot — outliers show as departures from the reference line
+qqnorm(qr.logit,
+       main = "QQ Plot: Quantile Residuals (Logit with Outlier)",
+       pch  = 20, col = "grey40", cex = 0.6)
+qqline(qr.logit, col = "red", lwd = 1.5)
+
+# identify the most extreme quantile residual
+cat("Most extreme quantile residual:\n")
+cat("  Observation:", which.max(abs(qr.logit)), "\n")
+cat("  Value:      ", round(max(abs(qr.logit)), 3), "\n")
+
+```
+
+The injected outlier (observation 1) shows up as a clearly separated point in the tail of the QQ plot. This is exactly the kind of signal you're looking for — one or a small number of points that don't belong to the same distribution as the rest.
+
+### Cook's Distance in GLMs
+
+Cook's distance measures the aggregate change in all coefficient estimates when observation $i$ is deleted. In GLMs, it uses the weighted hat matrix from IRWLS:
+
+$$D_i = \frac{(\hat{\boldsymbol{\beta}}_{(-i)} - \hat{\boldsymbol{\beta}})^\top (\mathbf{X}^\top \hat{\mathbf{W}} \mathbf{X}) (\hat{\boldsymbol{\beta}}_{(-i)} - \hat{\boldsymbol{\beta}})}{k \hat{\phi}}$$
+
+where $\hat{\mathbf{W}}$ is the diagonal matrix of IRWLS weights and $k$ is the number of parameters. `cooks.distance()` computes this directly for `glm()` objects:
+
+```{r cooks-d}
+#| fig.cap: "Cook's distance for the binary logistic model. The horizontal reference line is the common threshold of $4/n$. Observation 1 (the injected outlier) stands well above the rest."
+
+cd.logit <- cooks.distance(logit.full)
+
+# Cook's D plot with threshold line and labeling of extreme points
+cd.df <- data.frame(obs = seq_along(cd.logit), cd = cd.logit)
+
+ggplot(cd.df, aes(x = obs, y = cd)) +
+  geom_point(color = "grey40", alpha = 0.6, size = 1.2) +
+  geom_hline(yintercept = 4 / nrow(bin.df),
+             linetype = "dashed", color = "red") +
+  geom_text(data = filter(cd.df, cd > 4 / nrow(bin.df)),
+            aes(label = obs), vjust = -0.6, size = 3, color = "red") +
+  labs(x     = "Observation Index",
+       y     = "Cook's Distance",
+       title = "Cook's Distance — Binary Logit") +
+  theme_minimal()
+
+```
+
+The $4/n$ threshold is a conventional rule of thumb, not a hard boundary. What matters is whether any observations stand dramatically apart from the rest on the Cook's D scale — not whether they technically exceed $4/n$. In the plot above, observation 1 is unambiguously separated from the bulk of the data.
+
+### The `performance` Approach
+
+`performance::check_outliers()` combines Cook's D with several other influence measures (leverage, Mahalanobis distance) and returns a summary with flagged observations:
+
+```{r check-outliers}
+
+# check_outliers() flags observations by multiple criteria
+perf.outliers <- performance::check_outliers(logit.full)
+
+# print the summary
+print(perf.outliers)
+
+# plot the result
+plot(perf.outliers)
+
+```
+
+### DHARMa: Formal Outlier Testing
+
+DHARMa's `testOutliers()` uses the simulation-based residuals to ask: does this observation fall outside the range of what we'd expect from the fitted model? An observation at the extreme of the simulated distribution for its covariate pattern is flagged as a potential outlier:
+
+```{r dharma-outliers, cache=TRUE}
+#| fig.cap: "DHARMa outlier test for the Poisson count model with injected outliers. Red dots indicate observations that fall outside the simulated envelope."
+
+# DHARMa residuals for the NB model with injected outliers
+sim.nb <- DHARMa::simulateResiduals(nb.mod, n = 500, plot = FALSE)
+
+# outlier test: bootstrap version is more reliable for small samples
+DHARMa::testOutliers(sim.nb,
+                     type = "bootstrap",
+                     nBoot = 100,
+                     plot = TRUE)
+
+```
+
+The `testOutliers()` function returns a $p$-value from a binomial test asking whether more extreme observations appear than expected by chance. This is most reliable when $n$ is moderate to large — for small samples (under 100), treat it as a visual guide rather than a formal test.
+
+### Quantifying Influence: DFBETAS
+
+Cook's D tells you *that* an observation is influential; **DFBETAS** tell you *which coefficients* it influences and in which direction. The DFBETA for observation $i$ and coefficient $j$ is:
+
+$$\text{DFBETA}_{ij} = \frac{\hat{\beta}_j - \hat{\beta}_{j(-i)}}{\text{SE}(\hat{\beta}_j)}$$
+
+Values much larger than $2/\sqrt{n}$ (a common threshold) indicate that removing observation $i$ would substantially change the estimate of $\beta_j$.
+
+```{r dfbetas}
+#| fig.cap: "DFBETAS for the x1 coefficient in the binary logistic model. Values beyond $\\pm 2/\\sqrt{n}$ are flagged. Observation 1 exerts substantial downward influence on the x1 coefficient — consistent with our injected outlier, which has a high x1 value but an unexpected $Y = 0$ outcome."
+
+# dfbetas() works on glm objects
+db.logit <- dfbetas(logit.full)
+
+# plot DFBETAS for x1
+db.df <- data.frame(
+  obs     = seq_len(nrow(bin.df)),
+  dfb.x1  = db.logit[, "x1"]
+)
+
+thresh <- 2 / sqrt(nrow(bin.df))   # threshold = 2/sqrt(n)
+
+ggplot(db.df, aes(x = obs, y = dfb.x1)) +
+  geom_point(color = "grey40", alpha = 0.6, size = 1.2) +
+  geom_hline(yintercept =  thresh, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = -thresh, linetype = "dashed", color = "red") +
+  geom_text(data = filter(db.df, abs(dfb.x1) > thresh),
+            aes(label = obs), vjust = -0.6, size = 3, color = "red") +
+  labs(x     = "Observation Index",
+       y     = "DFBETA for x1",
+       title = "DFBETAS for x1 — Binary Logit") +
+  theme_minimal()
+
+```
+
+### Confirming Influence: The Before-and-After Comparison
+
+The most direct test of an observation's influence is to fit the model with and without it and compare the results. For a handful of flagged observations, this takes only a few lines:
+
+```{r before-after}
+
+# compare coefficients with and without the outlier
+compare.tbl <- data.frame(
+  Coefficient = names(coef(logit.full)),
+  With_obs1   = round(coef(logit.full), 4),
+  Without_obs1 = round(coef(logit.dropped), 4),
+  Change       = round(coef(logit.full) - coef(logit.dropped), 4)
+)
+
+kable(compare.tbl,
+      col.names = c("Coefficient", "With obs. 1", "Without obs. 1", "Difference"),
+      caption   = "Coefficient comparison: with vs. without the injected outlier") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+```
+
+The coefficient for `x1` changes substantially when observation 1 is removed — confirming that it's not just an outlier in the residual sense but a genuinely influential point. This is the diagnostic sequence: (1) quantile residuals to find candidates, (2) Cook's D to rank their overall influence, (3) DFBETAS to identify which coefficients they affect, (4) before-and-after comparison to quantify the impact.
+
+------------------------------------------------------------------------
+
+## Part III: What to Do with Influential Observations
+
+Finding an influential observation is the beginning of an investigation, not the end of one. The first step is always to understand *why* it's influential. Is it a data entry error? A genuine but unusual case that the model doesn't represent well? A member of a subgroup that deserves separate analysis? Each scenario calls for a different response.
+
+**If it's a data error:** Fix or remove it, and report what you did.
+
+**If it's a genuine observation:** Don't remove it without a substantive justification. Instead: - Report the analysis both with and without the observation and let readers see the sensitivity. - Ask whether your model is misspecified for this part of the covariate space — maybe the influential observation is telling you that the relationship is nonlinear (more on this below). - Consider a robust estimation approach that downweights extreme observations.
+
+**If it reveals a subgroup pattern:** An influential observation might be signaling that the effect of a predictor is heterogeneous across cases. This is an argument for adding an interaction or for fitting separate models.
+
+> An influential observation is a question, not a problem. It's asking: "is your model really the right description of what happens here?" Answer the question rather than suppressing it.
+
+------------------------------------------------------------------------
+
+## Part IV: Nonlinearity in GLMs
+
+### The Linearity Assumption — What It Actually Says
+
+GLMs don't assume the relationship between $Y$ and $X$ is linear on the original response scale. A Poisson model with a log link, for example, assumes that $\log(\mu)$ is linear in the predictors — which means $\mu$ itself is an exponential function of them. That's already a nonlinear relationship on the response scale, and it's fine as long as the model is otherwise correctly specified.
+
+The linearity assumption in a GLM is on the **link scale**: the linear predictor $\eta_i = \mathbf{x}_i^\top\boldsymbol{\beta}$ must be a linear function of each predictor $x_{ij}$. In other words, after applying the link function, each $x_j$ enters the model as $\beta_j x_{ij}$ — no squares, no logs, no steps. If the true relationship requires, say, $\beta_{j1} x_{ij} + \beta_{j2} x_{ij}^2$ to describe the association between $x_j$ and $g(\mu)$, then a model with just $\beta_j x_{ij}$ is misspecified.
+
+Why does this matter? A model that's linear where the truth is not will produce biased predictions throughout the range of $x_j$, biased coefficient estimates for other predictors that are correlated with $x_j$, and residual patterns that look like a mix of nonlinearity and outliers. This is the source of the interaction between these two problems.
+
+### Detecting Nonlinearity: Quantile Residual Plots Against Predictors
+
+The most direct nonlinearity diagnostic — plot the quantile residuals against each predictor and look for systematic curvature. Under a correctly specified model, quantile residuals should show no pattern when plotted against any predictor.
+
+```{r qr-nonlin}
+#| fig.cap: "Quantile residuals versus x1 (left) and x2 (right) for the misspecified Poisson model (linear in x1 but truth is quadratic). The loess curve in the left panel reveals a clear U-shaped pattern — the signature of a missing quadratic term. The right panel is clean."
+
+# compute quantile residuals for the misspecified model
+qr.poi <- statmod::qresid(poi.linear)
+
+# build a data frame for plotting
+qr.df <- poi.df %>%
+  mutate(qr = qr.poi, fitted = predict(poi.linear))
+
+# plot against x1
+p1 <- ggplot(qr.df, aes(x = x1, y = qr)) +
+  geom_point(color = "grey40", alpha = 0.4, size = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(se = TRUE, color = "steelblue", fill = "lightblue") +
+  labs(x = "x1", y = "Quantile Residual",
+       title = "QR vs. x1 (Misspecified)") +
+  theme_minimal()
+
+# plot against x2
+p2 <- ggplot(qr.df, aes(x = x2, y = qr)) +
+  geom_point(color = "grey40", alpha = 0.4, size = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(se = TRUE, color = "steelblue", fill = "lightblue") +
+  labs(x = "x2", y = "Quantile Residual",
+       title = "QR vs. x2 (Misspecified)") +
+  theme_minimal()
+
+p1 + p2
+
+```
+
+The U-shape in the left panel is the unmistakable signature of a missing quadratic term. The smoother lifts at the extremes of x1 and dips in the middle — exactly what you'd see if the true relationship is concave-down (negative quadratic coefficient) but we've fit a straight line through it.
+
+Compare with the correctly specified model:
+
+```{r qr-nonlin-correct}
+#| fig.cap: "Quantile residuals versus x1 for the correctly specified Poisson model (includes x1²). The pattern is gone — the smoother tracks the zero line throughout the range of x1."
+
+qr.correct <- statmod::qresid(poi.quad)
+
+ggplot(data.frame(x1 = x1.poi, qr = qr.correct),
+       aes(x = x1, y = qr)) +
+  geom_point(color = "grey40", alpha = 0.4, size = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(se = TRUE, color = "steelblue", fill = "lightblue") +
+  labs(x = "x1", y = "Quantile Residual",
+       title = "QR vs. x1 (Correctly Specified — includes x1²)") +
+  theme_minimal()
+
+```
+
+### DHARMa: Nonlinearity Detection via `testQuantiles()`
+
+DHARMa's `testQuantiles()` function formally tests whether the quantile residuals show systematic trends against a specified covariate. It fits quantile regressions at the 0.25, 0.5, and 0.75 quantiles and tests whether they deviate significantly from the expected flat lines:
+
+```{r dharma-nonlin, cache=TRUE}
+#| fig.cap: "DHARMa quantile regression test for nonlinearity against x1 in the misspecified Poisson model. Colored bands show the 0.25, 0.5, and 0.75 quantile fits; the shaded regions show expected uniform behavior. Significant deviation (starred) indicates the model is not capturing the relationship correctly."
+
+# simulate DHARMa residuals for the misspecified model
+sim.poi.wrong <- DHARMa::simulateResiduals(poi.linear, n = 500, plot = FALSE)
+
+# testQuantiles() tests for trends in the simulated residuals
+DHARMa::testQuantiles(sim.poi.wrong,
+                      predictor = poi.df$x1,
+                      plot = TRUE)
+
+```
+
+A significant result from `testQuantiles()` means the quantile regression lines through the residuals don't match what the model predicts — evidence of nonlinearity (or, potentially, of an outlier cluster). Check each predictor in turn.
+
+### GAMs as a Diagnostic Tool
+
+A powerful general approach to detecting nonlinearity is to fit a **Generalized Additive Model (GAM)** and compare it to the parametric GLM. A GAM replaces the linear term $\beta_j x_{ij}$ with a smooth function $f_j(x_{ij})$, estimated from the data without prescribing a functional form. If the smooth for a predictor is meaningfully different from a straight line, the linear GLM is misspecified for that predictor.
+
+```{r gam-nonlin}
+#| fig.cap: "GAM smooth for x1 in the Poisson count model. The dashed horizontal line at zero represents the linear null; the blue curve is the estimated smooth with 95% confidence band. The clear U-shape confirms the need for a quadratic term (or, equivalently, a spline) in the model."
+
+# fit a GAM with smooth terms for x1 and x2
+# family matches the GLM family — still Poisson here
+gam.poi <- mgcv::gam(y ~ s(x1) + s(x2),
+                     family = poisson(link = "log"),
+                     data   = poi.df)
+
+# plot the smooths — deviations from a horizontal line signal nonlinearity
+# the x1 smooth should show a clear curved pattern
+plot(gam.poi,
+     pages   = 1,
+     shade   = TRUE,
+     seWithMean = TRUE,
+     ylab    = "Partial Effect (log scale)",
+     main    = c("Smooth for x1", "Smooth for x2"))
+
+```
+
+::: question
+If the GAM gives me a smooth function, can't I just use the GAM instead of a parametric GLM?
+:::
+
+You could — and for prediction tasks, a GAM often outperforms a parametric GLM. But GAMs have two practical drawbacks in the political science context. First, the coefficients don't have the simple "one-unit increase in $X$ changes the outcome by..." interpretation that makes parametric models so useful for hypothesis testing. Second, GAM smooths aren't inherently connected to a theoretical model — you're estimating a flexible curve, not testing a prediction from theory.
+
+The most productive workflow is: (1) use the GAM to *diagnose* the parametric GLM — if the smooth looks linear, your linear specification is fine; if it looks quadratic, add $x^2$; if it looks like a step function, consider a spline or dummy coding; then (2) fit the appropriately specified parametric GLM and use *that* for inference.
+
+### Parametric Fixes for Nonlinearity
+
+Once you've identified a nonlinear relationship, you have several tools to address it within the GLM framework:
+
+**Polynomial terms.** The simplest fix: add $x^2$ (or $x^3$ for more complex curves) using `I(x^2)`. Confirm with a likelihood ratio test that the additional term improves fit significantly.
+
+```{r poly-fix}
+
+# compare linear vs. quadratic model for x1
+lmtest::lrtest(poi.linear, poi.quad)
+
+```
+
+**Natural splines.** For more flexible curves, a natural cubic spline via `splines::ns()` is a better choice than a polynomial, especially when the nonlinearity occurs at the extremes of the predictor's range. Splines are more numerically stable than high-degree polynomials and impose the sensible constraint that the function is linear outside the boundary knots:
+
+```{r spline-fix}
+#| fig.cap: "Predicted values from the linear model (dashed), quadratic model (solid), and natural spline model (dotted) for x1. All three capture the concave-down pattern, but the spline is most flexible."
+
+# fit a model with a natural spline for x1 (3 degrees of freedom)
+poi.spline <- glm(y ~ ns(x1, df = 3) + x2,
+                  family = poisson(link = "log"),
+                  data   = poi.df)
+
+# compare all three models
+aic.compare <- data.frame(
+  Model = c("Linear in x1", "Quadratic in x1", "Natural spline (df=3) in x1"),
+  AIC   = round(c(AIC(poi.linear), AIC(poi.quad), AIC(poi.spline)), 2),
+  BIC   = round(c(BIC(poi.linear), BIC(poi.quad), BIC(poi.spline)), 2)
+)
+
+kable(aic.compare,
+      caption = "Model comparison: linear vs. quadratic vs. spline") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+```
+
+**Log or other transformations.** If the GAM smooth looks like a log curve or a power function, a direct transformation of the predictor may be more interpretable than a spline:
+
+```{r transform, eval=FALSE}
+
+# log transformation of a predictor (useful for right-skewed counts or incomes)
+glm(y ~ log(x1 + 1) + x2,    # +1 to handle zeros
+    family = poisson,
+    data   = my.df)
+
+```
+
+------------------------------------------------------------------------
+
+## Part V: How Outliers and Nonlinearity Interact
+
+This is the part that trips people up most often, so it's worth being explicit about it.
+
+Suppose you have a predictor with a genuinely nonlinear relationship to the outcome, but you've fit a linear GLM. The model will underpredict the response at the extremes of $x$ and overpredict it in the middle (or vice versa, depending on the shape). Observations at the extremes of $x$ will have large residuals and may show up as apparent "outliers." If you remove those observations, the model will fit better — but you haven't fixed the nonlinearity, you've just hidden it.
+
+Conversely, suppose you have a genuine outlier at an extreme $x$ value with an unexpected response. The model will try to accommodate it by changing the coefficient estimate for $x$, which can introduce apparent curvature in the residuals. The quantile residual plot against $x$ may show a curved pattern that looks like nonlinearity but is really caused by a single influential observation.
+
+**The diagnostic sequence matters:**
+
+1.  **Check for outliers first** using Cook's D and DFBETAS. Identify any observations with both high leverage and large influence.
+2.  **Check for nonlinearity** using quantile residual plots and GAMs, both with and without the flagged observations.
+3.  **Ask what story the outlier is telling.** If removing the outlier makes the nonlinearity disappear, the "nonlinearity" was an artifact. If the nonlinearity remains after removing the outlier, both problems are real.
+
+```{r interaction-demo, cache=TRUE}
+#| fig.cap: "DHARMa quantile residuals for the NB model with injected count outliers, plotted against the predictor. The red curve deviates from flat at the right tail — but is this nonlinearity or the effect of the inflated observations? The DFBETAS plot (below) will help distinguish."
+
+# NB model with two injected outliers
+sim.nb.out <- DHARMa::simulateResiduals(nb.mod, n = 500, plot = FALSE)
+
+DHARMa::plotResiduals(sim.nb.out,
+                      form = nb.df$x,
+                      xlab = "x",
+                      main = "DHARMa Residuals vs. x (NB with Outliers)")
+
+```
+
+```{r dfbeta-nb}
+#| fig.cap: "DFBETAS for the x coefficient in the NB model. Observations 5 and 10 (the inflated counts) are clearly the most influential — they explain the apparent nonlinear pattern in the residual plot above."
+
+# DFBETAS for the NB model
+db.nb <- dfbetas(nb.mod)
+
+data.frame(obs = seq_len(nrow(nb.df)),
+           dfb = db.nb[, "x"]) %>%
+  ggplot(aes(x = obs, y = dfb)) +
+  geom_point(color = "grey40", alpha = 0.6, size = 1.2) +
+  geom_hline(yintercept =  2 / sqrt(nrow(nb.df)),
+             linetype = "dashed", color = "red") +
+  geom_hline(yintercept = -2 / sqrt(nrow(nb.df)),
+             linetype = "dashed", color = "red") +
+  geom_text(data = . %>% filter(abs(dfb) > 2 / sqrt(nrow(nb.df))),
+            aes(label = obs), vjust = -0.6, size = 3, color = "red") +
+  labs(x     = "Observation Index",
+       y     = "DFBETA for x",
+       title = "DFBETAS — NB Model with Injected Outliers") +
+  theme_minimal()
+
+```
+
+After identifying observations 5 and 10 as the source of the influential pattern, you'd re-examine those observations in the raw data, understand why their counts are so extreme, and then check whether the residual pattern persists after accounting for them — either by removing them (if they're data errors) or by modeling the count distribution more flexibly (if they're genuine).
+
+------------------------------------------------------------------------
+
+## Part VI: Outlier Detection in GLMMs
+
+Mixed models add complexity to outlier detection because there are two levels at which outliers can occur: individual observations within groups (level-1 outliers) and entire groups that behave unusually relative to the model (level-2 outliers).
+
+### Level-1 Outliers: DHARMa
+
+DHARMa handles GLMM outlier detection seamlessly at the observation level. The simulation-based residuals integrate over the random effects, so the quantile residuals at the observation level are directly interpretable:
+
+```{r glmm-outliers, cache=TRUE}
+#| fig.cap: "DHARMa outlier test for the GLMM with an injected 'flipped' group. The observation-level test may or may not flag individual observations — the group-level plot below is more revealing."
+
+sim.glmm <- DHARMa::simulateResiduals(glmm.mod, n = 500, plot = FALSE)
+
+DHARMa::testOutliers(sim.glmm,
+                     type = "bootstrap",
+                     nBoot = 100,
+                     plot = TRUE)
+
+```
+
+### Level-2 Outliers: Group-Aggregated Residuals
+
+For detecting outlier groups, aggregate the DHARMa residuals to the group level and inspect the distribution. Groups with extreme mean residuals are behaving unusually relative to the model:
+
+```{r glmm-group-outliers}
+#| fig.cap: "Mean DHARMa quantile residual by group. Group 1 (the artificially flipped group) stands out clearly with a mean residual near 0 — because all its outcomes were reversed, the model's predictions are exactly wrong for this group and the residuals cluster near 0.5 in the DHARMa scale (0.5 on the uniform scale maps to 0 on the normal scale — perfect misfit in the opposite direction). Other groups show the expected variation near 0.5."
+
+# extract DHARMa residuals (these are on the uniform (0,1) scale internally)
+glmm.df$dharma.res <- residuals(sim.glmm, quantileFunction = qnorm)
+
+# aggregate to group level
+group.res <- glmm.df %>%
+  group_by(grp) %>%
+  summarise(mean.qr    = mean(dharma.res, na.rm = TRUE),
+            n          = n())
+
+ggplot(group.res, aes(x = reorder(grp, mean.qr), y = mean.qr)) +
+  geom_col(fill = "steelblue", alpha = 0.8) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(x     = "Group (sorted by mean residual)",
+       y     = "Mean Quantile Residual",
+       title = "Group-Level Residual Means — GLMM") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank())
+
+```
+
+### Level-2 Outliers: QQ Plot of Random Effects
+
+The estimated random effects (BLUPs) are assumed to be $N(0, \tau^2)$. A QQ plot of the BLUPs reveals groups whose random effects are implausibly extreme under the model's assumptions. Groups with very large BLUP values in the tails of the distribution are candidates for further examination:
+
+```{r blup-qqplot}
+#| fig.cap: "QQ plot of estimated random effects (BLUPs). Group 1 (the injected outlier group) appears in the tail, reflecting that the model assigns it an extreme random intercept to try to accommodate its unusual pattern."
+
+blups <- ranef(glmm.mod)$grp[, "(Intercept)"]
+blup.df <- data.frame(
+  grp  = rownames(ranef(glmm.mod)$grp),
+  blup = blups
+)
+
+qqnorm(blups,
+       main = "QQ Plot of Random Effects (BLUPs)",
+       pch  = 20, col = "steelblue")
+qqline(blups, col = "red")
+
+# label the most extreme BLUP
+extreme.idx <- which.max(abs(blups))
+text(qnorm((extreme.idx - 0.5) / length(blups)),
+     sort(blups)[extreme.idx],
+     labels = blup.df$grp[order(blups)][extreme.idx],
+     pos = 2, col = "red", cex = 0.8)
+
+```
+
+------------------------------------------------------------------------
+
+## Summary: The Diagnostic Sequence
+
+```{r summary-table, results='asis'}
+
+summ.tbl <- data.frame(
+  Step = c(
+    "1. Initial residual check",
+    "2. Identify outlier candidates",
+    "3. Rank overall influence",
+    "4. Identify which coefficients are affected",
+    "5. Quantify influence",
+    "6. Check for nonlinearity",
+    "7. Locate nonlinearity source",
+    "8. Formal nonlinearity test",
+    "9. Fit corrected model",
+    "10. GLMMs: group-level check"
+  ),
+  Tool = c(
+    "Quantile residual QQ plot (`statmod::qresid()` or DHARMa)",
+    "`performance::check_outliers()`; DHARMa `testOutliers()`",
+    "`cooks.distance()` plot with $4/n$ threshold",
+    "`dfbetas()` plot per coefficient",
+    "Refit model with/without flagged obs.; compare coefficients",
+    "QR vs. predictor plots (with loess); DHARMa `testQuantiles()`",
+    "GAM (`mgcv::gam()`) — inspect smooth for each predictor",
+    "LRT: `lrtest(linear.mod, augmented.mod)`",
+    "Polynomial `I(x^2)`, natural spline `ns(x, df)`, or transformation",
+    "Aggregate DHARMa residuals by group; BLUP QQ plot"
+  )
+)
+
+kable(summ.tbl,
+      col.names = c("Step", "Tool / Approach"),
+      caption   = "Recommended diagnostic sequence for outliers and nonlinearity in GLMs and GLMMs") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE)
+
+```
+
+One final point worth emphasizing: this sequence is iterative, not strictly linear. Finding an outlier may change your assessment of whether there's nonlinearity; addressing nonlinearity may dissolve apparent outliers. Run through the sequence, address what you find, and run through it again until the residuals look clean. That's not a sign of $p$-hacking — it's a sign that you understand your data.
+
+------------------------------------------------------------------------
+
+## References
