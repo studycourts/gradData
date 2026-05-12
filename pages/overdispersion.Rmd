@@ -1,0 +1,666 @@
+---
+title: "Overdispersion and Excess Zeros in Count Models"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
+output:
+  bookdown::html_document2:
+    number_sections: FALSE
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+    code_folding: show
+    self_contained: true
+    base_format: rmarkdown::html_document
+bibliography: site_refs.bib
+csl: gill_apsr.csl
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center"
+)
+
+options(scipen = 999)
+options(digits = 4)
+
+```
+
+```{css, echo=FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width: 80%;
+  white-space: nowrap;
+}
+
+```
+
+> Click 'show' to see the libraries used in this page.
+
+```{r libs, class.source = "fold-hide"}
+
+P <- c(
+  "knitr",          # rendering
+  "kableExtra",     # table formatting
+  "texreg",         # htmlreg() for model tables
+  "DHARMa",         # simulation-based residuals; overdispersion and zero tests
+  "performance",    # check_overdispersion(), check_zeroinflation()
+  "lmtest",         # lrtest() for nested model comparison
+  "MASS",           # glm.nb() for negative binomial
+  "pscl",           # zeroinfl(), hurdle(), vuong()
+  "patchwork",      # combining ggplots
+  "tidyverse"       # wrangling and ggplot2 — load last
+)
+
+for (pkg in P) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, repos = "http://cran.us.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+
+rm(P, pkg)  # clean up the mess
+
+```
+
+> Click 'show' to see the data simulation code.
+
+```{r sims, class.source = "fold-hide"}
+
+set.seed(1975)   # for reproducibility
+
+# ── Simulation 1: Well-behaved Poisson data ───────────────────────────────────
+# true data-generating process is Poisson; the model should fit well
+# used as a baseline to show what "good" looks like
+
+n    <- 800
+x1   <- rnorm(n)
+x2   <- rbinom(n, 1, 0.4)                        # binary predictor
+
+mu.poi  <- exp(1.2 + 0.6 * x1 - 0.4 * x2)       # true conditional mean
+y.poi   <- rpois(n, lambda = mu.poi)             # Poisson counts
+
+poi.df <- data.frame(y = y.poi, x1 = x1, x2 = x2)
+
+# fit the correctly specified Poisson model
+poi.mod <- glm(y ~ x1 + x2,
+               family    = poisson(link = "log"),
+               data      = poi.df,
+               na.action = na.omit)
+
+# ── Simulation 2: Overdispersed count data ────────────────────────────────────
+# true DGP is negative binomial (theta = 1.5)
+# we fit a Poisson to show what overdispersion looks like in diagnostics
+
+mu.nb  <- exp(1.2 + 0.6 * x1 - 0.4 * x2)
+y.nb   <- MASS::rnegbin(n, mu = mu.nb, theta = 1.5)  # overdispersed counts
+
+nb.df  <- data.frame(y = y.nb, x1 = x1, x2 = x2)
+
+# misspecified Poisson (wrong family for these data)
+poi.wrong <- glm(y ~ x1 + x2,
+                 family    = poisson(link = "log"),
+                 data      = nb.df,
+                 na.action = na.omit)
+
+# correctly specified negative binomial
+nb.mod <- MASS::glm.nb(y ~ x1 + x2,
+                       data      = nb.df,
+                       na.action = na.omit)
+
+# quasipoisson for comparison (estimates dispersion, keeps Poisson structure)
+qpoi.mod <- glm(y ~ x1 + x2,
+                family    = quasipoisson(link = "log"),
+                data      = nb.df,
+                na.action = na.omit)
+
+# ── Simulation 3: Zero-inflated data ─────────────────────────────────────────
+# two-process DGP: first a binary "structural zero" process, then Poisson counts
+# ~30% of observations are structural zeros (e.g., non-participants in a process)
+
+p.zero  <- plogis(-0.8 + 0.5 * x2)               # probability of structural zero
+is.zero <- rbinom(n, 1, p.zero)                   # structural zero indicator
+
+mu.zip  <- exp(0.9 + 0.7 * x1)                   # Poisson mean for non-zero process
+y.count <- rpois(n, lambda = mu.zip)              # Poisson counts
+y.zip   <- ifelse(is.zero == 1, 0, y.count)       # apply structural zeros
+
+zip.df  <- data.frame(y = y.zip, x1 = x1, x2 = x2)
+
+# misspecified Poisson on ZIP data
+poi.zip.wrong <- glm(y ~ x1 + x2,
+                     family    = poisson(link = "log"),
+                     data      = zip.df,
+                     na.action = na.omit)
+
+# correctly specified ZIP model
+zip.mod <- pscl::zeroinfl(
+  y ~ x1 + x2 | x2,        # count process | zero-inflation process
+  dist = "poisson",
+  data = zip.df
+)
+
+# ── Simulation 4: Overdispersed AND zero-inflated data (ZINB) ─────────────────
+# the combination that requires the most complex model
+
+p.zero.nb  <- plogis(-0.6 + 0.4 * x2)
+is.zero.nb <- rbinom(n, 1, p.zero.nb)
+mu.zinb    <- exp(1.0 + 0.6 * x1)
+y.nb.raw   <- MASS::rnegbin(n, mu = mu.zinb, theta = 2)
+y.zinb     <- ifelse(is.zero.nb == 1, 0, y.nb.raw)
+
+zinb.df  <- data.frame(y = y.zinb, x1 = x1, x2 = x2)
+
+# correctly specified ZINB
+zinb.mod <- pscl::zeroinfl(
+  y ~ x1 + x2 | x2,
+  dist = "negbin",
+  data = zinb.df
+)
+
+# NB model for comparison (handles overdispersion but not zero inflation)
+nb.zinb.wrong <- MASS::glm.nb(y ~ x1 + x2, data = zinb.df)
+
+```
+
+---
+
+## Introduction
+
+Count data — the number of times something happened — are everywhere in political science. Bills introduced in a legislature. Protest events in a country-year. Conflict events in a region. Doctor visits in a survey year. The natural starting point for all of these is the Poisson model, which assumes that the variance of the outcome equals its mean: $\text{Var}(Y) = E(Y) = \mu$.
+
+Real count data almost never cooperate with this assumption. The variance is almost always larger than the mean — sometimes much larger. This is **overdispersion**, and ignoring it has a specific and unpleasant consequence: the Poisson model will underestimate standard errors, making your predictors look more precisely estimated than they really are. In a field that already has a fraught relationship with $p$-values and significance thresholds, this is not a small problem.
+
+A related but distinct issue is **excess zeros**: more observations with a count of zero than the fitted model predicts, even after accounting for the mean structure. This often arises because some units in the sample can't or wouldn't experience the event under any circumstances — they're zeroes for structural reasons, not just because their Poisson rate happened to be low.
+
+This page works through both problems systematically. We start with the basics of the equidispersion assumption and what it looks like when it fails, move through the tools for detecting each problem, and end with a decision framework for choosing among the family of count models.
+
+---
+
+## The Equidispersion Assumption
+
+The Poisson distribution is characterized by a single parameter $\lambda$ (or $\mu$ in regression notation) that serves as both the conditional mean and the conditional variance:
+
+$$E(Y \mid \mathbf{x}) = \text{Var}(Y \mid \mathbf{x}) = \mu$$
+
+This equidispersion property is elegant but restrictive. It says that if your model predicts, on average, 3 events for a given covariate pattern, then the variance of the count for that covariate pattern should also be 3. For data generated by a pure Poisson process — radioactive decay, random arrivals in a queue — this is exactly right. For social and political phenomena, it almost never is.
+
+The most direct way to see this in your data is to compare the sample mean and variance of the count variable before you even fit a model:
+
+```{r equidispersion-check}
+
+# compare mean and variance — if roughly equal, Poisson is plausible
+cat("=== Well-behaved Poisson data ===\n")
+cat("Mean:    ", round(mean(poi.df$y), 3), "\n")
+cat("Variance:", round(var(poi.df$y),  3), "\n")
+cat("Ratio:   ", round(var(poi.df$y) / mean(poi.df$y), 3), "\n\n")
+
+cat("=== Overdispersed NB data ===\n")
+cat("Mean:    ", round(mean(nb.df$y), 3), "\n")
+cat("Variance:", round(var(nb.df$y),  3), "\n")
+cat("Ratio:   ", round(var(nb.df$y) / mean(nb.df$y), 3), "\n")
+
+```
+
+A variance-to-mean ratio near 1 is consistent with equidispersion. Ratios substantially greater than 1 signal overdispersion. This is a quick first check, not a formal test — it doesn't condition on the covariates, so it can be misleading if the mean is highly variable across observations. But it's a useful starting point.
+
+---
+
+## Detecting Overdispersion
+
+### After Fitting: The QuasiPoisson Approach
+
+The cleanest post-estimation check for overdispersion is to refit the model using the `quasipoisson` family, which relaxes the equidispersion constraint by estimating a dispersion parameter $\phi$ from the data:
+
+$$\text{Var}(Y \mid \mathbf{x}) = \phi \cdot \mu$$
+
+If $\phi = 1$, the data are equidispersed and the standard Poisson is appropriate. If $\phi > 1$, the data are overdispersed. The estimated $\phi$ is reported as the "(Estimated) dispersion parameter" in the `summary()` output:
+
+```{r quasipoisson}
+
+# quasipoisson on well-behaved data: phi should be near 1
+cat("=== QuasiPoisson on Poisson data ===\n")
+summary(glm(y ~ x1 + x2,
+            family = quasipoisson,
+            data   = poi.df))$dispersion
+
+# quasipoisson on overdispersed data: phi should be >> 1
+cat("\n=== QuasiPoisson on NB data ===\n")
+summary(qpoi.mod)$dispersion
+
+```
+
+A dispersion parameter of, say, 4.2 means the actual variance in the data is about 4.2 times what the Poisson model predicts. Standard errors from the Poisson model will be off by a factor of $\sqrt{4.2} \approx 2.0$ — every $p$-value and confidence interval is wrong.
+
+### The `performance` Approach
+
+`performance::check_overdispersion()` provides a formal test based on the ratio of the Pearson $\chi^2$ statistic to its degrees of freedom:
+
+```{r check-overdispersion}
+
+# formal overdispersion test
+cat("=== Poisson data ===\n")
+performance::check_overdispersion(poi.mod)
+
+cat("\n=== NB data fit with Poisson ===\n")
+performance::check_overdispersion(poi.wrong)
+
+```
+
+The test statistic is the **Pearson dispersion statistic** $\hat{\phi} = \chi^2_P / (n - k)$, where $\chi^2_P = \sum (y_i - \hat{\mu}_i)^2 / \hat{\mu}_i$ is the sum of squared Pearson residuals. Under the null of equidispersion, this should be approximately 1. A significant result confirms overdispersion.
+
+### DHARMa: Simulation-Based Dispersion Test
+
+DHARMa's `testDispersion()` provides a complementary simulation-based test. It compares the variance of the observed data to the variance of datasets simulated from the fitted model, asking whether the observed variance is unusually large relative to what the model predicts:
+
+```{r dharma-dispersion, cache=TRUE}
+#| fig.cap: "DHARMa dispersion test for the Poisson model fitted to overdispersed data. The red line marks the observed standard deviation; the histogram shows the distribution of standard deviations from data simulated under the fitted model. The observed value falls far to the right of the simulated distribution — strong evidence of overdispersion."
+
+sim.wrong <- DHARMa::simulateResiduals(poi.wrong, n = 500, plot = FALSE)
+
+DHARMa::testDispersion(sim.wrong, plot = TRUE)
+
+```
+
+The histogram of simulated dispersion values should surround the observed value (red line) if the model is correctly specified. When the observed value sits in the tail of the histogram, the model is systematically underpredicting variance.
+
+::: question
+I ran all three overdispersion tests and they all say the data are overdispersed. Do I need to report all of them?
+:::
+
+No — one well-chosen test is enough to establish the point. In practice, the `performance::check_overdispersion()` result (which gives you a test statistic and a $p$-value) is the most compact and conventional way to report it. Mention the quasiPoisson dispersion estimate alongside it to give readers a sense of the scale of the problem. The DHARMa plot is most useful for your own understanding and for presentations where a visual makes the issue vivid — you don't necessarily need to include it in a paper.
+
+---
+
+## Responding to Overdispersion
+
+### Option 1: The QuasiPoisson Model
+
+The quasipoisson model corrects standard errors for overdispersion without changing the coefficient estimates. It multiplies all standard errors by $\sqrt{\hat{\phi}}$, which widens confidence intervals and increases $p$-values appropriately. Coefficients are identical to the standard Poisson.
+
+This is a pragmatic fix rather than a proper probabilistic model — the quasipoisson doesn't have a likelihood, which means you can't use AIC, BIC, or likelihood ratio tests to compare it to other models. Use it when you want a quick correction and don't need formal model comparison.
+
+```{r quasipoisson-compare}
+#| results: 'asis'
+
+# side by side: Poisson (wrong) vs. QuasiPoisson (corrected SEs)
+# notice: identical coefficients, wider SEs in QuasiPoisson
+texreg::htmlreg(
+  list(poi.wrong, qpoi.mod),
+  custom.model.names = c("Poisson (wrong)", "QuasiPoisson"),
+  caption     = "Poisson vs. QuasiPoisson: coefficients are identical; standard errors differ",
+  caption.above = TRUE,
+  single.row  = TRUE,
+  stars       = c(0.001, 0.01, 0.05)
+)
+
+```
+
+### Option 2: The Negative Binomial Model
+
+The negative binomial model is the standard probabilistic solution to overdispersion. It adds a dispersion parameter $\theta$ (sometimes called the precision parameter) that allows the variance to exceed the mean:
+
+$$\text{Var}(Y \mid \mathbf{x}) = \mu + \frac{\mu^2}{\theta}$$
+
+When $\theta \rightarrow \infty$, the NB collapses to the Poisson (no overdispersion). Smaller $\theta$ means more overdispersion relative to Poisson. Because the NB has a proper likelihood, it supports AIC/BIC comparisons and likelihood ratio tests.
+
+```{r nb-compare}
+#| results: 'asis'
+
+# Poisson vs. NB on overdispersed data
+texreg::htmlreg(
+  list(poi.wrong, nb.mod),
+  custom.model.names = c("Poisson (misspecified)", "Negative Binomial"),
+  caption     = "Poisson vs. Negative Binomial on overdispersed count data",
+  caption.above = TRUE,
+  single.row  = TRUE,
+  stars       = c(0.001, 0.01, 0.05)
+)
+
+```
+
+```{r nb-lrt}
+
+# confirm: NB fits significantly better than Poisson
+# (note: lrtest() requires both models to have likelihoods — not valid for quasipoisson)
+lmtest::lrtest(poi.wrong, nb.mod)
+
+```
+
+```{r nb-dispersion}
+
+# look at the estimated theta (precision) parameter
+cat("Estimated theta:", round(nb.mod$theta, 3), "\n")
+cat("SE of theta:    ", round(nb.mod$SE.theta, 3), "\n")
+
+```
+
+A $\theta$ estimate of around 1.5 is consistent with how we generated these data ($\theta = 1.5$ in the simulation). Smaller $\theta$ values indicate more severe overdispersion.
+
+The LRT comparing Poisson to NB should be overwhelmingly significant here — the two models are nested (Poisson is NB with $\theta \rightarrow \infty$), and the data were genuinely generated by an NB process.
+
+---
+
+## Detecting Excess Zeros
+
+Overdispersion and excess zeros are distinct problems that can occur independently or together. Overdispersion is about the overall variance being too large; excess zeros are about there being more zero counts specifically than the model predicts. You can have overdispersion without excess zeros (just a fat-tailed count distribution), and you can have excess zeros without much general overdispersion (if the count process for non-zero observations is well-behaved).
+
+### Visual Check First
+
+The most informative first step is to compare the observed distribution of counts to the model's predicted distribution:
+
+```{r zero-check-visual}
+#| fig.cap: "Observed count distribution (blue) versus predicted distributions from Poisson (red) and ZIP (green) models for the zero-inflated simulation. The Poisson dramatically underpredicts the number of zeros; the ZIP matches the observed distribution closely."
+
+# compute observed zero fraction and model-predicted zero fractions
+obs.zero.poi <- mean(poi.df$y == 0)
+obs.zero.zip <- mean(zip.df$y == 0)
+
+# Poisson predicted zero fraction: P(Y=0) = exp(-mu)
+pred.zero.poi.on.poi <- mean(exp(-predict(poi.mod, type = "response")))
+pred.zero.poi.on.zip <- mean(exp(-predict(poi.zip.wrong, type = "response")))
+
+# ZIP predicted zero fraction: structural zeros + Poisson zeros
+zip.pred.prob <- predict(zip.mod, type = "prob")[, 1]
+pred.zero.zip <- mean(zip.pred.prob)
+
+zero.compare <- data.frame(
+  Dataset = c("Poisson data", "ZIP data"),
+  Observed   = round(c(obs.zero.poi, obs.zero.zip), 3),
+  Pred_Poisson = round(c(pred.zero.poi.on.poi, pred.zero.poi.on.zip), 3),
+  Pred_ZIP   = c(NA, round(pred.zero.zip, 3))
+)
+
+kable(zero.compare,
+      col.names = c("Dataset", "Observed % zeros",
+                    "Poisson predicted % zeros", "ZIP predicted % zeros"),
+      caption   = "Observed vs. predicted proportion of zeros",
+      na        = "—") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+```
+
+```{r rootogram, cache=TRUE}
+#| fig.cap: "Hanging rootogram comparing observed (bars) to Poisson-predicted (red curve) and ZIP-predicted (blue curve) count distributions on the zero-inflated data. The bars show the square root of observed counts; when a bar hangs below the zero line, the model overpredicts that count value. The Poisson underpredicts zeros dramatically; the ZIP fits well."
+
+# hanging rootogram: a specialized plot for count data fit
+# the bars hang from the fitted curve; bars below the x-axis = underprediction
+
+# observed counts
+obs.counts <- table(factor(zip.df$y, levels = 0:max(zip.df$y)))
+obs.k      <- as.integer(names(obs.counts))
+
+# Poisson predicted counts
+poi.lambda <- predict(poi.zip.wrong, type = "response")
+poi.pred   <- sapply(obs.k, function(k) sum(dpois(k, poi.lambda)))
+
+# ZIP predicted counts
+zip.probs  <- predict(zip.mod, type = "prob")
+zip.pred   <- sapply(obs.k, function(k) {
+  j <- k + 1  # column index (zero-indexed counts)
+  if (j <= ncol(zip.probs)) sum(zip.probs[, j]) else 0
+})
+
+# rootogram data
+rg.df <- data.frame(
+  k         = obs.k,
+  obs       = as.numeric(obs.counts),
+  poi.pred  = poi.pred,
+  zip.pred  = zip.pred
+) %>%
+  mutate(
+    sqrt.obs      = sqrt(obs),
+    sqrt.poi.pred = sqrt(poi.pred),
+    sqrt.zip.pred = sqrt(zip.pred),
+    hang.poi      = sqrt.obs - sqrt.poi.pred,
+    hang.zip      = sqrt.obs - sqrt.zip.pred
+  ) %>%
+  filter(k <= 15)   # trim to first 15 counts for readability
+
+ggplot(rg.df, aes(x = k)) +
+  geom_col(aes(y = hang.poi), fill = "tomato", alpha = 0.5, width = 0.4,
+           position = position_nudge(x = -0.2)) +
+  geom_col(aes(y = hang.zip), fill = "steelblue", alpha = 0.5, width = 0.4,
+           position = position_nudge(x =  0.2)) +
+  geom_hline(yintercept = 0, color = "black") +
+  scale_x_continuous(breaks = 0:15) +
+  labs(x     = "Count value (k)",
+       y     = "√(Observed) − √(Predicted)",
+       title = "Hanging Rootogram: Poisson (red) vs. ZIP (blue)") +
+  theme_minimal()
+
+```
+
+The hanging rootogram is one of the most useful plots for count model diagnostics. Bars that drop below the zero line indicate count values where the model underpredicts; bars above the line indicate overprediction. The Poisson model's dramatic dip at zero is the visual signature of excess zeros.
+
+### Formal Tests
+
+`performance::check_zeroinflation()` provides a formal test based on comparing the observed number of zeros to the model's predicted number:
+
+```{r check-zeroinflation}
+
+# formal zero-inflation test
+cat("=== Poisson model on Poisson data (no excess zeros) ===\n")
+performance::check_zeroinflation(poi.mod)
+
+cat("\n=== Poisson model on ZIP data (excess zeros) ===\n")
+performance::check_zeroinflation(poi.zip.wrong)
+
+```
+
+The test reports the observed and predicted zero counts alongside a $p$-value. A significant result means the model is not accounting for all the zeros in the data.
+
+DHARMa's `testZeroInflation()` provides a simulation-based version:
+
+```{r dharma-zeroinfl, cache=TRUE}
+#| fig.cap: "DHARMa zero-inflation test for the Poisson model on zero-inflated data. The red vertical line marks the observed number of zeros; the histogram shows the distribution of zero counts across simulated datasets. The observed value sits far to the right — more zeros than the model can account for."
+
+sim.zip.wrong <- DHARMa::simulateResiduals(poi.zip.wrong, n = 500, plot = FALSE)
+DHARMa::testZeroInflation(sim.zip.wrong, plot = TRUE)
+
+```
+
+---
+
+## Responding to Excess Zeros
+
+When you've confirmed that your data have more zeros than the count model predicts, you have two main modeling frameworks to choose from. They embody different theoretical assumptions about where the zeros are coming from.
+
+### Zero-Inflated Models
+
+Zero-inflated models assume there are two types of observations in the data:
+
+- **Structural zeros**: units that would always produce a zero, regardless of the predictor values — they're "always-zero" cases. Maybe they don't participate in the process at all.
+- **Sampling zeros**: units that could in principle produce a non-zero count but happened to produce zero in this observation period because their rate is low.
+
+The zero-inflated model estimates two processes simultaneously: a binary model for the probability of being a structural zero, and a count model (Poisson or NB) for the non-structural-zero cases. The probability of observing $Y = 0$ is:
+
+$$P(Y = 0) = \pi + (1 - \pi) \cdot P_{\text{count}}(Y = 0 \mid \mu)$$
+
+where $\pi$ is the probability of being a structural zero and $P_{\text{count}}(Y = 0 \mid \mu) = e^{-\mu}$ for the Poisson.
+
+```{r zip-model}
+
+# ZIP model: Poisson count process, binary zero-inflation process
+# formula: count process | zero-inflation process
+# here: count process depends on x1; inflation process depends on x2
+zip.fit <- pscl::zeroinfl(
+  y ~ x1 | x2,
+  dist = "poisson",
+  data = zip.df
+)
+
+summary(zip.fit)
+
+```
+
+The output has two sections: the count model (log-linear, same interpretation as Poisson) and the zero-inflation model (logit, giving the log-odds of being a structural zero). A positive coefficient in the zero-inflation model means the predictor *increases* the probability of being in the "always-zero" group.
+
+### Hurdle Models
+
+Hurdle models take a different structural position. They assume:
+
+1. A binary process determines whether the count is zero or positive.
+2. Conditional on being positive, a truncated count model (Poisson or NB truncated at zero) determines the magnitude.
+
+The key conceptual difference from the zero-inflated model is that in the hurdle model, *all* zeros come from the binary process — there's no mixing of structural and sampling zeros. The zero-inflation model allows sampling zeros to appear in both the binary and count components; the hurdle model draws a hard line.
+
+```{r hurdle-model}
+
+# hurdle model: binary process for zero vs. non-zero,
+# truncated Poisson for the positive counts
+hurdle.fit <- pscl::hurdle(
+  y ~ x1 | x2,
+  dist  = "poisson",
+  zero.dist = "binomial",
+  data  = zip.df
+)
+
+summary(hurdle.fit)
+
+```
+
+::: question
+How do I decide between a ZIP and a hurdle model? They both seem to fit excess zeros.
+:::
+
+The decision is primarily theoretical, not statistical. Ask yourself: does it make conceptual sense for some units to be structurally incapable of the outcome? If yes, zero-inflation is the right framing. If the distinction between "structural zeros" and "sampling zeros" doesn't map onto anything meaningful in your application, a hurdle model's cleaner two-part structure (zero vs. positive, then how many) is often more interpretable.
+
+The Vuong test can provide some empirical guidance — it compares the log-likelihoods of the two models on an observation-by-observation basis:
+
+```{r vuong}
+
+# Vuong test: positive statistic favors ZIP; negative favors hurdle
+# (both are compared against the standard Poisson here)
+pscl::vuong(zip.fit, hurdle.fit)
+
+```
+
+Treat the Vuong test as one piece of evidence, not a decision rule. A non-significant result doesn't mean the models are equivalent — it means the data don't strongly discriminate between them, which is itself useful information.
+
+### When Both Problems Are Present: ZINB
+
+When the data are both overdispersed *and* zero-inflated, the zero-inflated negative binomial (ZINB) is the appropriate model. It combines the NB count process (which handles overdispersion) with the zero-inflation binary component:
+
+```{r zinb}
+
+# ZINB: NB count process with zero-inflation
+zinb.fit <- pscl::zeroinfl(
+  y ~ x1 | x2,
+  dist = "negbin",
+  data = zinb.df
+)
+
+# compare NB (handles overdispersion only) to ZINB (handles both)
+lmtest::lrtest(nb.zinb.wrong, zinb.fit)
+
+```
+
+The LRT comparing NB to ZINB tests whether the zero-inflation component is needed on top of the negative binomial's natural accommodation of overdispersion. A significant result means the extra zeros can't be fully explained by the NB's fat tail.
+
+---
+
+## Checking the Final Model
+
+Once you've chosen and fitted your count model, run the standard diagnostic checks to confirm the fit is adequate. DHARMa handles all count model types — Poisson, NB, ZIP, ZINB, and hurdle — via the same `simulateResiduals()` workflow:
+
+```{r dharma-final, cache=TRUE}
+#| fig.cap: "DHARMa residuals for the ZIP model on zero-inflated data. Both the QQ plot (left) and the residual-vs-fitted plot (right) should look clean under a correctly specified model."
+
+# DHARMa residuals for the ZIP model
+sim.zip <- DHARMa::simulateResiduals(zip.fit, n = 500, plot = FALSE)
+plot(sim.zip, main = "DHARMa Residuals — ZIP Model")
+
+```
+
+```{r dharma-final-tests}
+
+# formal tests for the ZIP model
+DHARMa::testUniformity(sim.zip)
+DHARMa::testDispersion(sim.zip)
+DHARMa::testZeroInflation(sim.zip)
+
+```
+
+After fitting the correct model, all three tests should be non-significant: the residuals should be uniform, the dispersion should be consistent with the model, and the zero counts should match the model's predictions.
+
+---
+
+## The Count Model Decision Tree
+
+Here is a practical summary of the model selection process for count data:
+
+```{r decision-table, results='asis'}
+
+dec.tbl <- data.frame(
+  Step = c(
+    "1. Fit Poisson; check overdispersion",
+    "1a. Overdispersion confirmed",
+    "1b. No overdispersion",
+    "2. Check for excess zeros (on Poisson or NB)",
+    "2a. Excess zeros + no overdispersion",
+    "2b. Excess zeros + overdispersion",
+    "2c. No excess zeros + no overdispersion",
+    "2d. No excess zeros + overdispersion",
+    "3. Choose ZIP vs. hurdle",
+    "4. Confirm final model with DHARMa"
+  ),
+  Action = c(
+    "`performance::check_overdispersion()` or `testDispersion()`",
+    "Switch to NB (`MASS::glm.nb()`); compare with LRT",
+    "Keep Poisson (but check for zero inflation)",
+    "`performance::check_zeroinflation()` or `testZeroInflation()`",
+    "Zero-inflated Poisson (ZIP) or Poisson hurdle (`pscl`)",
+    "Zero-inflated NB (ZINB) or NB hurdle (`pscl`)",
+    "Poisson is adequate",
+    "Negative binomial is adequate",
+    "Theoretical: are structural zeros plausible? If yes: ZIP/ZINB. If no: hurdle.",
+    "`simulateResiduals()` + `plot()` + all three `test*()` functions"
+  )
+)
+
+kable(dec.tbl,
+      col.names = c("Step", "Action / Model"),
+      caption   = "Count model selection: a step-by-step decision guide") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE)
+
+```
+
+One thing worth stating plainly: model selection in count data is iterative. Diagnosing overdispersion, then excess zeros, then checking the final model — and potentially looping back if the final model still doesn't fit — is the process, not a sign that you're doing something wrong. DHARMa's `testZeroInflation()` and `testDispersion()` on the final model are your best guide to whether you've arrived at an adequate specification.
+
+---
+
+## References

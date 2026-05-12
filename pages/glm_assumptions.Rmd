@@ -1,0 +1,561 @@
+---
+title: "GLM: Model-Specific Assumptions"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
+output:
+  bookdown::html_document2:
+    number_sections: FALSE
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+    code_folding: show
+    self_contained: true
+    base_format: rmarkdown::html_document
+bibliography: site_refs.bib
+csl: gill_apsr.csl
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center"
+)
+
+options(scipen = 999)
+options(digits = 4)
+
+```
+
+```{css, echo=FALSE}
+
+/* This code defines the question div */
+
+.question {
+  border: 1px solid #cccccc;
+  background-color: #f4faff;
+  padding: 1em;
+  border-radius: 5px;
+  margin: 1em 0;
+}
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width: 80%;
+  white-space: nowrap;
+}
+
+```
+
+> Click 'show' to see the libraries used in this page.
+
+```{r libs, class.source = "fold-hide"}
+
+P <- c(
+  "knitr",          # rendering
+  "kableExtra",     # table formatting
+  "texreg",         # htmlreg() for model tables
+  "ordinal",        # clm(), clmm(), nominal_test()
+  "MASS",           # polr() — needed by brant and vif
+  "brant",          # brant() test for PO assumption
+  "gofcat",         # brant.test() and gof() for ordinal models
+  "VGAM",           # vglm() for GOL, PPO, SLM, multinomial
+  "nnet",           # multinom() for standard multinomial logit
+  "lmtest",         # lrtest()
+  "ggeffects",      # ggpredict() for effect plots
+  "patchwork",      # combining ggplots
+  "tidyverse"       # wrangling and ggplot2 — load last
+)
+
+for (pkg in P) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, repos = "http://cran.us.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+
+rm(P, pkg)  # clean up the mess
+
+```
+
+> Click 'show' to see the data simulation code.
+
+```{r sims, class.source = "fold-hide"}
+
+set.seed(1975)   # for reproducibility
+
+# ── Simulation 1: Ordinal outcome — PO holds for all predictors ───────────────
+# a three-category ordered outcome with two continuous predictors
+# the true model is a proportional odds model
+
+n.po <- 800
+
+x1.po <- rnorm(n.po)                  # continuous predictor 1
+x2.po <- rnorm(n.po)                  # continuous predictor 2
+
+# true cumulative log-odds (proportional odds — same beta at every cutpoint)
+# cutpoints at -0.8 and 0.8 on the latent scale
+lat.po  <- -0.9 * x1.po + 0.5 * x2.po + rlogis(n.po)
+y.po    <- cut(lat.po,
+               breaks = c(-Inf, -0.8, 0.8, Inf),
+               labels = c("low", "medium", "high"))
+y.po    <- factor(y.po, ordered = TRUE)
+
+po.df   <- data.frame(y = y.po, x1 = x1.po, x2 = x2.po)
+
+# ── Simulation 2: Ordinal outcome — PO violated for x1 ───────────────────────
+# the effect of x1 is larger for the low|medium cutpoint than for medium|high
+# this is the partial proportional odds scenario
+
+n.vio <- 800
+
+x1.vio <- rnorm(n.vio)
+x2.vio <- rnorm(n.vio)
+
+# different latent effects at each cutpoint for x1 (violation)
+# x2 still has the same effect at both cutpoints (PO holds for x2)
+lat.vio <- rlogis(n.vio)
+y.vio.lat1 <- -0.8 - 1.8 * x1.vio + 0.5 * x2.vio   # latent for cut 1
+y.vio.lat2 <-  0.8 - 0.3 * x1.vio + 0.5 * x2.vio   # latent for cut 2
+
+# construct the ordinal outcome from the two separate binary processes
+y.vio <- case_when(
+  lat.vio < y.vio.lat1 - mean(y.vio.lat1) ~ "low",
+  lat.vio < y.vio.lat2 - mean(y.vio.lat2) ~ "medium",
+  TRUE ~ "high"
+)
+y.vio <- factor(y.vio,
+                levels  = c("low", "medium", "high"),
+                ordered = TRUE)
+
+vio.df <- data.frame(y = y.vio, x1 = x1.vio, x2 = x2.vio)
+
+# ── Simulation 3: Nominal outcome — four-category unordered DV ───────────────
+# used to demonstrate IIA: respondent chooses among four political parties
+# two predictors: left-right ideology (lr) and rural/urban context (ru)
+
+n.mn <- 1000
+
+lr   <- rnorm(n.mn)                   # left-right ideology
+ru   <- rbinom(n.mn, 1, 0.45)        # rural (1) vs. urban (0)
+
+# true log-odds relative to baseline (party A):
+# party B: left-leaning urban party
+# party C: right-leaning party (both contexts)
+# party D: rural populist party
+xb.b <- -0.3 - 1.2 * lr + 0.8 * ru  # B vs. A
+xb.c <-  0.2 + 1.1 * lr - 0.3 * ru  # C vs. A
+xb.d <- -0.5 - 0.4 * lr + 1.5 * ru  # D vs. A
+
+# convert to probabilities via softmax
+denom <- 1 + exp(xb.b) + exp(xb.c) + exp(xb.d)
+p.a   <- 1           / denom
+p.b   <- exp(xb.b)   / denom
+p.c   <- exp(xb.c)   / denom
+p.d   <- exp(xb.d)   / denom
+
+# simulate the choice
+party <- apply(cbind(p.a, p.b, p.c, p.d), 1,
+               function(p) sample(c("A","B","C","D"), 1, prob = p))
+party <- factor(party)
+
+mn.df <- data.frame(party = party, lr = lr, ru = ru)
+
+```
+
+------------------------------------------------------------------------
+
+## Introduction
+
+Every model in the GLM family carries the general assumptions we've discussed on other pages in this series — correct distributional family, linearity on the link scale, no influential outliers, and so on. But some model families also carry assumptions that are specific to their particular structure: assumptions that don't arise in binary logistic regression or Poisson models, but that become important the moment you extend to ordinal or nominal outcomes.
+
+This page covers two such assumptions. The **proportional odds assumption** is specific to ordered logit and probit models, and it's one of the most commonly violated — and most commonly ignored — assumptions in the political science literature. The **independence of irrelevant alternatives** (IIA) assumption is specific to the multinomial logit model, and it's one of the most commonly misunderstood.
+
+Both are worth understanding deeply, because both have clear implications for how to specify your model and how to interpret its results.
+
+------------------------------------------------------------------------
+
+## The Proportional Odds Assumption
+
+### What It Is
+
+The proportional odds (PO) model — the standard ordered logit — estimates a single coefficient $\hat{\beta}_j$ for each predictor $x_j$, and it constrains that coefficient to be the same at every threshold of the ordinal outcome. If your outcome has three categories (low, medium, high), the model estimates two cumulative log-odds equations:
+
+$$\log\frac{P(Y \leq \text{low})}{P(Y > \text{low})} = \alpha_1 - \boldsymbol{\beta}^\top \mathbf{x}$$
+
+$$\log\frac{P(Y \leq \text{medium})}{P(Y > \text{medium})} = \alpha_2 - \boldsymbol{\beta}^\top \mathbf{x}$$
+
+Notice that $\boldsymbol{\beta}$ is the same in both equations. The thresholds ($\alpha_1$ and $\alpha_2$) shift, but the effect of the predictors stays constant across the threshold. This is the proportional odds assumption: the log-odds of being at or below any given category are proportional across values of the predictors, with the proportionality constant being $e^{\beta_j}$.
+
+Visually, this means that if you fit a separate binary logit for each cumulative threshold (low vs. not-low, medium-or-low vs. high), the coefficient estimates for each predictor should be approximately the same across those binary models. The PO model is essentially fitting all of those binary logits simultaneously, under the constraint that the coefficients are equal.
+
+::: question
+Why does this constraint exist? Couldn't we just let the coefficients be different at each threshold?
+:::
+
+We could — and when the PO assumption fails, that's exactly what we do (more on this below). The constraint exists because it makes the model parsimonious: instead of estimating $(J-1) \times k$ coefficients (where $J$ is the number of outcome categories and $k$ is the number of predictors), we estimate only $k$ coefficients plus $(J-1)$ thresholds. With many categories and predictors, that's a substantial saving. And when the constraint is appropriate — when the predictors really do have the same association with the outcome across all thresholds — the PO model is more efficient than its unconstrained alternatives.
+
+The problem is that the assumption is often wrong in practice. The effect of education on the probability of strong versus mild support for a policy might be much larger than the effect of education on mild versus no support. The effect of ideology on voting for a far-right party might be nonlinear across the scale. When the assumption fails and we ignore it, the PO model gives us a coefficient that is a kind of weighted average across the thresholds — interpretable in a rough sense, but potentially misleading about where in the outcome distribution the action is really happening.
+
+### Visualizing the Assumption
+
+Before running formal tests, it's worth seeing what the PO assumption looks like. Fit a binary logit for each cumulative threshold and compare the coefficient estimates. Under the PO assumption, they should be close to each other and to the PO model's estimate.
+
+```{r po-visual}
+#| fig.cap: "Coefficient estimates from separate binary logit models at each threshold (points) compared to the PO model's single estimate (horizontal line with 95% CI shading). When the PO assumption holds, the binary logit estimates should be close to the PO estimate at every threshold. Left: PO holds (Simulation 1). Right: PO violated for x1 (Simulation 2)."
+
+# function to extract binary logit estimates at each threshold
+threshold.coefs <- function(data, dv, predictors) {
+  levs   <- levels(data[[dv]])
+  result <- list()
+  for (j in seq_len(length(levs) - 1)) {
+    # binary outcome: at or below threshold j vs. above
+    data$y.bin <- as.integer(as.numeric(data[[dv]]) <= j)
+    fmla <- as.formula(paste("y.bin ~", paste(predictors, collapse = " + ")))
+    m    <- glm(fmla, family = binomial, data = data)
+    cs   <- coef(summary(m))
+    result[[j]] <- data.frame(
+      threshold = paste0("≤ ", levs[j]),
+      term      = rownames(cs)[-1],
+      estimate  = cs[-1, "Estimate"],
+      se        = cs[-1, "Std. Error"]
+    )
+  }
+  do.call(rbind, result)
+}
+
+# PO model estimates
+po.mod   <- ordinal::clm(y ~ x1 + x2, data = po.df)
+vio.mod  <- ordinal::clm(y ~ x1 + x2, data = vio.df)
+
+# binary logit estimates at each threshold
+thresh.po  <- threshold.coefs(po.df,  "y", c("x1", "x2"))
+thresh.vio <- threshold.coefs(vio.df, "y", c("x1", "x2"))
+
+# PO model coefficients as reference lines
+po.ref  <- data.frame(term = c("x1","x2"),
+                      est  = coef(po.mod)[c("x1","x2")])
+vio.ref <- data.frame(term = c("x1","x2"),
+                      est  = coef(vio.mod)[c("x1","x2")])
+
+# plot function
+plot.thresh <- function(thresh.df, ref.df, title) {
+  ggplot(thresh.df, aes(x = threshold, y = estimate, color = term, shape = term)) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = estimate - 1.96 * se,
+                      ymax = estimate + 1.96 * se),
+                  width = 0.15) +
+    geom_hline(data = ref.df, aes(yintercept = est, color = term),
+               linetype = "dashed") +
+    facet_wrap(~ term, scales = "free_y") +
+    labs(x = "Cumulative Threshold", y = "Coefficient Estimate",
+         title = title) +
+    theme_minimal() +
+    theme(legend.position = "none")
+}
+
+p.holds  <- plot.thresh(thresh.po,  po.ref,  "PO Assumption Holds")
+p.viol   <- plot.thresh(thresh.vio, vio.ref, "PO Violated for x1")
+
+p.holds + p.viol
+
+```
+
+When the PO assumption holds (left panel), the binary logit estimates at each threshold cluster around the PO model's estimate for both predictors. When it's violated (right panel), the estimates for x1 diverge substantially across the two thresholds — the dashed reference line is a poor summary of what's happening at different parts of the outcome scale.
+
+### Formal Tests
+
+#### The Brant Test
+
+The Brant test is a Wald-type test that formally compares the coefficient at each threshold to a common value. It requires a `MASS::polr()` object and uses the `brant` package:
+
+```{r brant-test}
+
+# polr() objects are needed for brant()
+polr.po  <- MASS::polr(y ~ x1 + x2, data = po.df,  Hess = TRUE)
+polr.vio <- MASS::polr(y ~ x1 + x2, data = vio.df, Hess = TRUE)
+
+# brant test: H0 = PO holds; significant result = violation
+# the "omnibus" row tests the overall assumption
+# individual rows test each predictor separately
+cat("--- Brant Test: PO Holds ---\n")
+brant::brant(polr.po)
+
+cat("\n--- Brant Test: PO Violated ---\n")
+brant::brant(polr.vio)
+
+```
+
+The output gives you an omnibus test (does the PO assumption hold overall?) and variable-specific tests (which predictor is causing the problem?). In the second model, the omnibus test should be significant and the x1 row should flag it as the culprit — exactly what we built into the simulation.
+
+#### The Likelihood Ratio Test
+
+The `ordinal::nominal_test()` function provides a likelihood ratio test for the PO assumption, testing each predictor individually by comparing the constrained PO model to a model that relaxes the constraint for that predictor. It's generally considered more reliable than the Brant test, particularly in small samples where the Brant test's Wald-based inference can be unstable:
+
+```{r nominal-test}
+
+# nominal_test() compares the PO model to a model with predictor-specific thresholds
+# H0: PO holds for that predictor; significant = violation
+cat("--- Nominal Test: PO Holds ---\n")
+ordinal::nominal_test(po.mod)
+
+cat("\n--- Nominal Test: PO Violated ---\n")
+ordinal::nominal_test(vio.mod)
+
+```
+
+When the Brant test and the LR test agree, you can be confident in the conclusion. When they disagree, lean toward the LR test.
+
+::: question
+The Brant test says PO is fine, but the LR test says it's violated. Which one do I report?
+:::
+
+Report both, and go with the LR test's conclusion. The Brant test uses a Wald statistic, which can be unreliable in the presence of the Hauck-Donner effect (large coefficients) or small samples — exactly the conditions where the PO assumption is most likely to matter. The LR test directly compares log-likelihood values without relying on a quadratic approximation, which gives it better finite-sample properties.
+
+### What to Do When the PO Assumption Fails
+
+You have four main options. The right choice depends on which predictors are violating the assumption and how severely.
+
+#### Partial Proportional Odds (PPO)
+
+When only some predictors violate the PO assumption, the most efficient response is to relax the constraint only for those predictors while keeping it in place for the rest. This is the **partial proportional odds** model, estimated with `VGAM::vglm()`:
+
+```{r ppo}
+#| results: 'asis'
+
+# PPO model: relax PO constraint for x1 only (the violating predictor)
+# parallel = FALSE ~ x1 means x1 gets threshold-specific coefficients
+# x2 still has a common coefficient across thresholds (PO holds for x2)
+ppo.mod <- VGAM::vglm(
+  y ~ x1 + x2,
+  family = VGAM::cumulative(parallel = FALSE ~ x1,
+                            reverse  = TRUE),
+  data   = vio.df
+)
+
+# display the coefficient table
+# you'll see two estimates for x1 (one per threshold) and one for x2
+coef(summary(ppo.mod))
+
+```
+
+The PPO model gives x1 threshold-specific coefficients, allowing it to have a larger effect at the low\|medium threshold than at the medium\|high threshold. The coefficient for x2 is still constrained to be equal across thresholds (the PO constraint holds for it).
+
+#### Generalized Ordered Logit (GOL)
+
+When most or all predictors violate the PO assumption, relax the constraint globally:
+
+```{r gol, eval=FALSE}
+
+# GOL: all predictors get threshold-specific coefficients
+# this is the most flexible model — (J-1) x k coefficients
+gol.mod <- VGAM::vglm(
+  y ~ x1 + x2,
+  family = VGAM::cumulative(parallel = FALSE,
+                            reverse  = TRUE),
+  data   = vio.df
+)
+
+```
+
+The GOL gives you the most flexibility but at the cost of $(J-1) \times k$ coefficients instead of $k$. With many categories and predictors, this model can become difficult to estimate and interpret.
+
+#### The Stereotype Logit Model (SLM)
+
+The SLM takes a structurally different approach. Rather than estimating separate coefficients at each threshold, it estimates a single vector of predictor effects $\boldsymbol{\beta}$ and a set of $(J-2)$ scaling parameters $\phi_j$:
+
+$$\log\frac{P(Y = j)}{P(Y = J)} = \alpha_j + \phi_j \boldsymbol{\beta}^\top \mathbf{x}, \quad j = 1, \ldots, J-1$$
+
+The $\phi_j$ parameters scale the predictor effects at each category. If the $\phi_j$ are monotonically increasing (constrained to $0 = \phi_1 \leq \phi_2 \leq \cdots \leq \phi_{J-1} = 1$), the model respects the ordinal ordering of the outcome while allowing the effect to accelerate or decelerate across categories. As a diagnostic tool, the $\phi_j$ also test whether the ordering you've assumed is empirically supported — if they're not monotone, that's a signal your category ordering may be wrong.
+
+```{r slm, eval=FALSE}
+
+# SLM via VGAM::vglm with sratio() family
+# the parallel argument constrains phi to be monotone
+slm.mod <- VGAM::vglm(
+  y ~ x1 + x2,
+  family = VGAM::sratio(parallel = TRUE ~ x1 + x2),
+  data   = vio.df
+)
+
+coef(slm.mod)   # check the phi parameters for monotonicity
+
+```
+
+The SLM is a good middle ground between the PO model (too constrained) and the GOL (too many parameters): it relaxes the strict proportionality constraint without requiring a full set of threshold-specific coefficients.
+
+#### Multinomial Logit as a Fallback
+
+If the proportional odds assumption is violated severely enough that even the PPO or SLM don't fit well, the multinomial logit treats the outcome as completely unordered — no thresholds, no proportionality constraint, just a separate binary logit for each category versus a reference. This loses the ordinal structure of the outcome entirely, but it's at least honest about what the model can and can't tell you.
+
+------------------------------------------------------------------------
+
+## The Independence of Irrelevant Alternatives
+
+### What It Is
+
+The multinomial logit model (MNL) — the standard model for nominal outcomes with three or more unordered categories — rests on a structural assumption called the **independence of irrelevant alternatives** (IIA). It's one of the most debated assumptions in the discrete choice literature, and understanding it well helps you make better decisions about when to use the MNL and when to consider alternatives.
+
+The IIA assumption says that the odds of choosing alternative $j$ over alternative $k$ depend only on the characteristics of $j$ and $k$ — not on the characteristics of any other alternative in the choice set. Formally, for any two alternatives $j$ and $k$:
+
+$$\frac{P(Y = j)}{P(Y = k)} = \frac{e^{\mathbf{x}^\top\boldsymbol{\beta}_j}}{e^{\mathbf{x}^\top\boldsymbol{\beta}_k}}$$
+
+This ratio doesn't involve the parameters for any other alternative. Adding a new alternative $m$ to the choice set doesn't change the relative odds of $j$ versus $k$.
+
+The most famous illustration of why this can be problematic is the **red bus / blue bus** problem, due to Debreu (1960). Suppose a commuter currently chooses between driving a car and taking a red bus with equal probability — the odds are 1:1. Now a blue bus service identical to the red bus in every respect is introduced. The IIA assumption implies that the odds of car versus red bus remain 1:1 after the blue bus is introduced. So the commuter ends up with probabilities 1/3 car, 1/3 red bus, 1/3 blue bus. But this is absurd: the commuter is presumably indifferent between the two buses and should end up at 1/2 car, 1/4 red bus, 1/4 blue bus.
+
+The MNL inflated the car probability reduction because it treated the two buses as independent alternatives rather than near-perfect substitutes.
+
+### When Does IIA Matter?
+
+The red bus / blue bus scenario is a deliberately extreme case. In most political science applications, the IIA assumption matters less dramatically, but it can still produce misleading results when your outcome categories are close substitutes for each other.
+
+**Examples where IIA is likely violated:** - Vote choice among candidates from the same ideological camp (left-wing voters choosing between two left parties) - Coalition preferences among parties with overlapping platforms - Policy preferences among options that share many features
+
+**Examples where IIA is less likely to matter:** - Choosing among outcome categories that are clearly distinct (e.g., different types of political regime) - Outcomes where the full choice set is fixed and well-defined - When the IIA-violating alternative is not present in your data
+
+The crucial question is not "does IIA technically hold?" but "does the violation of IIA materially affect the coefficients or predictions I care about?" A small IIA violation with negligible consequences is less worrying than a modest violation in a model whose policy implications depend on substitution patterns.
+
+### Testing for IIA
+
+::: question
+Can you just test whether IIA holds, and move on if it passes?
+:::
+
+This is where things get uncomfortable. The two most widely used tests — the **Hausman-McFadden test** and the **Small-Hsiao test** — are both known to be unreliable. They can fail to detect genuine IIA violations (low power) and can reject IIA when it actually holds (poor size control), particularly in samples of the size typical in political science research. The Hausman-McFadden test can even produce negative test statistics, which is incoherent for a $\chi^2$ statistic.
+
+Both tests work by comparing a full MNL (all alternatives) to a restricted MNL (with one alternative removed), under the logic that if IIA holds, the coefficients should be the same in both models. The problem is that the restricted model uses a non-random subsample of the data (observations that chose the removed alternative are dropped), which introduces selection bias into the comparison.
+
+```{r iia-test, eval=FALSE}
+
+# the Hausman-McFadden test is available via the mlogit package
+# shown here for illustration — interpret cautiously
+library(mlogit)
+
+mn.mlogit  <- mlogit(party ~ 1 | lr + ru,
+                     data   = mlogit.data(mn.df,
+                                          choice = "party",
+                                          shape  = "wide"),
+                     reflevel = "A")
+
+# restricted model excluding party D
+mn.restrict <- mlogit(party ~ 1 | lr + ru,
+                      data      = mlogit.data(
+                        mn.df %>% filter(party != "D"),
+                        choice = "party",
+                        shape  = "wide"),
+                      reflevel = "A")
+
+# Hausman test (from mlogit)
+# a positive statistic favors IIA; negative statistic is a known failure mode
+hmftest(mn.mlogit, mn.restrict)
+
+```
+
+Given these limitations, current practice is to treat IIA as a theoretical rather than an empirical question. Before running any test:
+
+1.  **Ask whether your outcome categories are plausible substitutes.** If they are, IIA is likely violated and an alternative model is warranted regardless of what a test says.
+2.  **Use the test as supporting evidence**, not as the primary justification for your model choice. If the test doesn't reject IIA, that's weak evidence in favor — not a green light to proceed without further thought.
+
+### The Stereotype Logit as a Diagnostic
+
+Even when you're committed to MNL, it's worth estimating the **stereotype logit model (SLM)** as a diagnostic. The SLM's $\phi$ parameters test whether the outcome categories have an empirical ordering. If they're monotonically increasing, that's evidence of underlying ordinality — which might mean an ordered logit fits better than MNL. If they're out of order or collapse categories together (consecutive $\phi$ values equal to each other), that's evidence the categories don't have a meaningful ordering and MNL is appropriate.
+
+```{r slm-diagnostic}
+
+# fit the SLM as a diagnostic for the nominal outcome
+# constrained version: test whether outcome has ordinal structure
+slm.nom <- VGAM::vglm(
+  party ~ lr + ru,
+  family = VGAM::sratio(parallel = FALSE ~ lr + ru),
+  data   = mn.df
+)
+
+# extract the phi parameters — are they monotonically ordered?
+# phi parameters are those named ":(Intercept)" in the coefficient vector
+slm.coefs <- coef(slm.nom)
+cat("SLM phi parameters:\n")
+print(round(slm.coefs[grep("Intercept", names(slm.coefs))], 3))
+
+```
+
+If the $\phi$ estimates are not monotonically ordered, the SLM is suggesting that your categories don't have a clear empirical ordering — supporting the use of MNL.
+
+### Alternatives to MNL When IIA Is Violated
+
+When IIA is a genuine concern, you have several alternatives. All of them are more complex than MNL and require additional data or stronger assumptions:
+
+**Nested logit:** Groups alternatives into nests, with IIA holding within nests but not across them. A commuter who takes transit chooses first among transit options (bus, subway), then among driving options. The nesting structure must be specified by the researcher and is a strong theoretical assumption in itself.
+
+**Mixed logit (random parameters logit):** Allows coefficients to vary across individuals, which naturally relaxes IIA. Computationally intensive and requires individual-level data on choice occasions.
+
+**Conditional logit with alternative-specific variables:** When your data include attributes of the alternatives themselves (not just characteristics of the chooser), the conditional logit model handles substitution patterns more flexibly than MNL.
+
+In practice, most political science applications of nominal DVs use MNL because the alternatives above require data structures that aren't common in observational survey research. The honest approach is to: (1) make the case on theoretical grounds that your outcome categories are not close substitutes; (2) report the IIA tests as supplementary evidence while noting their limitations; and (3) discuss what IIA violation would imply for your substantive conclusions.
+
+------------------------------------------------------------------------
+
+## Summary
+
+```{r summary-table, results='asis'}
+
+summ.tbl <- data.frame(
+  Issue = c(
+    "PO assumption holds?",
+    "PO violated for some predictors",
+    "PO violated for most/all predictors",
+    "Category ordering questionable",
+    "IIA — theoretical check",
+    "IIA — formal test",
+    "IIA violated"
+  ),
+  How_to_check = c(
+    "Brant test (`brant::brant()`); LR test (`ordinal::nominal_test()`); threshold coefficient plot",
+    "Which predictors? Variable-specific rows in Brant and nominal_test output",
+    "Omnibus Brant or LR test significant; all predictors diverge across thresholds",
+    "SLM phi parameters: are they monotonically ordered?",
+    "Are outcome categories plausible substitutes? Theory first",
+    "Hausman-McFadden or Small-Hsiao test — use cautiously; known reliability problems",
+    "Which categories substitute for each other? Nesting structure plausible?"
+  ),
+  Response = c(
+    "Proceed with PO model",
+    "Partial proportional odds (`VGAM::vglm()` with `parallel = FALSE ~ violating_var`)",
+    "Generalized ordered logit (`parallel = FALSE` globally) or SLM",
+    "Re-examine category ordering; SLM; consider MNL if ordering is wrong",
+    "If categories are close substitutes, plan for an alternative regardless of test result",
+    "Treat as supplementary evidence only; never as the sole justification",
+    "Nested logit; mixed logit; conditional logit; or acknowledge limitation and proceed with MNL"
+  )
+)
+
+kable(summ.tbl,
+      col.names = c("Issue", "How to check", "Response"),
+      caption   = "Diagnostic decision guide: PO assumption and IIA") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE)
+
+```
+
+------------------------------------------------------------------------
+
+## References
