@@ -21,9 +21,9 @@ knit: (function(input, ...) {
   })
 ---
 
-```{css, echo = FALSE}
+```{css, echo=FALSE}
 
-/* This code defines the question div */
+/* define the divs */
 
 .question {
   border: 1px solid #cccccc;
@@ -33,14 +33,16 @@ knit: (function(input, ...) {
   margin: 1em 0;
 }
 
-/* This code defines the highlighted "mark" tag */
-
-mark {
-  background-color: LemonChiffon;
-  color: black;
+.note {
+  padding: 1em 1em 1em 1em;
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  border-radius: .25rem;
+  border-left: 0.3rem solid #007bff; /* Color for 'note' type */
+  background-color: #f8f9fa;
 }
 
-/* This code makes the tables a little nicer. */
+/* make tables & captions prettier */
 
 table, td, th {
   border: none;
@@ -50,8 +52,13 @@ table, td, th {
   margin-right: auto;
   margin-top: 1em;
   margin-bottom: 1em;
-  max-width:80%;
-  white-space:nowrap;
+  max-width: 80%;
+  width: auto !important;    /* overrides Bootstrap's width: 100% */
+  white-space: nowrap;
+}
+
+caption, .caption {
+  font-weight: bold;
 }
 
 ```
@@ -60,9 +67,21 @@ table, td, th {
 #| label: setup
 #| include: false
 
-knitr::opts_chunk$set(echo = TRUE, 
-                      message = FALSE, 
-                      warning = FALSE, 
-                      cache = FALSE)
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center",
+  fig.topcaption = TRUE
+)
+
+options(scipen = 999)
+options(digits = 4)
+options(knitr.kable.NA = "")     
 
 ```
+
+::: note
+This page is built in R Markdown. Most code chunks are hidden by default, but you can click 'show' to see the code that loads the libraries and generates the data, figures, and tables. The code is also available in my [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
+:::
