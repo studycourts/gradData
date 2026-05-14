@@ -99,6 +99,8 @@ P <- c(
   "brant",          # brant() test for PO assumption
   "gofcat",         # brant.test() and gof() for ordinal models
   "VGAM",           # vglm() for GOL, PPO, SLM, multinomial
+  "clustord",       # for osm(), a nice way to do SLM
+  "mlogit",         # for multinomial logit
   "nnet",           # multinom() for standard multinomial logit
   "lmtest",         # lrtest()
   "ggeffects",      # ggpredict() for effect plots
@@ -191,7 +193,7 @@ Every model in the GLM family carries the general assumptions we've discussed on
 
 This page covers two such assumptions:
 
-- The **proportional odds assumption** is specific to ordered logit and probit models. It also happens to be one of the more commonly violated (and ignored) assumptions in the political science literature [@longRegression2014].
+- The **proportional odds assumption** is specific to ordered logit and ordered probit models. It also happens to be one of the more commonly violated (and ignored) assumptions in the political science literature [@longRegression2014].
 - The **independence of irrelevant alternatives** (IIA) assumption is specific to the multinomial logit model, and it's one of the most commonly misunderstood [@pattydefense2019].
 
 Both are worth understanding because they have clear implications for how to specify your model and how to interpret its results. It's also good to be aware that there is a lot of debate in the literature about whether/when/how these assumptions matter, since you may come across reviewers who have contrary opinions on the subject.
@@ -512,6 +514,12 @@ modelsummary(modz,
 
 The PPO model gives x1 threshold-specific coefficients, allowing it to have a larger effect at the low\|medium threshold than at the medium\|high threshold. The coefficient for x2 is still constrained to be equal across thresholds (the PO constraint holds for it).
 
+::: question
+Why are there empty spaces in the table? It's hard to wrap my head around what I'm looking at.
+:::
+
+Yes, it's a little tricky to make sense of what's happening in the table. The empty spaces are where some of the models use different specifications for including a particular predictor. For example, the PPO model includes two versions of x1 with threshold-specific coefficients but includes x2 with a single coefficient across thresholds. Once we get all of the alternative models estimated, we'll make a coefficient plot so we can see things a little more clearly.
+
 #### Generalized Ordered Logit (GOL)
 
 When most or all predictors violate the PO assumption, relax the constraint globally:
@@ -540,13 +548,21 @@ modelsummary(modz,
 
 The GOL gives you the most flexibility but at the cost of $(J-1) \times k$ coefficients instead of $k$. With many categories and predictors, this model can become difficult to estimate and interpret.
 
+::: question
+So is
+:::
+
 #### The Stereotype Logit Model (SLM)
 
 The SLM takes a structurally different approach. Rather than estimating separate coefficients at each threshold, it estimates a single vector of predictor effects $\boldsymbol{\beta}$ and a set of $(J-2)$ scaling parameters $\phi_j$:
 
 $$\log\frac{P(Y = j)}{P(Y = J)} = \alpha_j + \phi_j \boldsymbol{\beta}^\top \mathbf{x}, \quad j = 1, \ldots, J-1$$
 
-The $\phi_j$ parameters scale the predictor effects at each category. If the $\phi_j$ are monotonically increasing (constrained to $0 = \phi_1 \leq \phi_2 \leq \cdots \leq \phi_{J-1} = 1$), the model respects the ordinal ordering of the outcome while allowing the effect to accelerate or decelerate across categories. As a diagnostic tool, the $\phi_j$ also test whether the ordering you've assumed is empirically supported — if they're not monotone, that's a signal your category ordering may be wrong.
+The $\phi_j$ parameters scale the predictor effects at each category. If the $\phi_j$ are monotonically increasing (constrained to $0 = \phi_1 \leq \phi_2 \leq \cdots \leq \phi_{J-1} = 1$), the model respects the ordinal ordering of the outcome while allowing the effect to accelerate or decelerate across categories. As a diagnostic tool, the $\phi_j$ also test whether the ordering you've assumed is empirically supported — if they're not monotone, that's a signal your category ordering may be wrong. In our case, we have $j=3$, meaning that we have three levels in $Y_j$. The top level is constrained to 1 and the bottom is constrained to 0. This means that the one $\phi$ parameter we'll estimate should be $1 > \phi > 0$ if our dependent variable $Y_j$ is in the order that our model thinks it should be.
+
+There are a few different ways to estimate an SLM. The `VGAM::vglm()` function can do it with the `sratio()` family, and the `clustord::osm()` function is a more specialized tool for fitting SLMs. Both give you the same estimates, but the `clustord` package also provides a convenient way to check the monotonicity of the $\phi_j$ parameters. I'm going to estimate both. I'll use `VGAM` in the comparison table, since `clustord::osm` doesn't play nice with any of the packages we normally use to make tables. But I'll also put the raw text output here because the output is a bit simpler to understand. For more on how this works, see [this explanation of how to do SLM](https://cran.r-project.org/web/packages/clustord/vignettes/RegressionwithOSM.pdf "Link to pdf") with `clustord`.
+
+Let's take a peek:
 
 ```{r}
 #| label: slm
@@ -558,20 +574,78 @@ slm.mod <- VGAM::vglm(
   data   = vio.df
 )
 
-#coef(slm.mod)   # check the phi parameters for monotonicity
+# SLM via clustord::osm
+slm.osm <- clustord::osm(y ~ x1 + x2, data = vio.df)
+
+slm.osm$phi %>%  # check the phi parameters for monotonicity
+  kable(,
+        digits = 3,
+        caption = "SLM Phi Check")
+```
+
+This shows us that our $\phi$ parameter **is** between 0 and 1, which is a good sign that our ordering of the outcome categories is supported by the data. If $\phi$ had been greater than 1 or less than 0, that would have been a red flag that our assumed ordering might be wrong.
+
+::: question
+Well, it's *technically* between 0 and 1, but it's pretty close to 1. Does that mean anything?
+:::
+
+Good catch. It means that the model might not be able to distinguish between these two levels of $Y_j$. Let's take a look at the raw `summary()` output, which provides us with hypothesis tests of the $\phi$ parameters:
+
+```{r}
+#| label: osm-summary
+
+summary(slm.osm)
+
+```
+
+There's a lot happening here, but what we really want to look at is the $\phi$ parameter for "medium." The null hypothesis is that this level is indistinguishable from the level above it. Here, we fail to reject the null. This means that the model can't statistically distinguish the "medium" category from the "high" category. This suggests that the ordering of our categories might not be as clear-cut as we thought, and that "medium" and "high" might be more similar to each other than either is to "low." But now we're in the weeds, since this page isn't supposed to be about stereotype logit (even though it's my favorite model to put in the appendix).
+
+Instead, let's press on to take stock of all of our models:
+
+```{r}
+#| label: slm-table
 
 # add to table
 modz <- c(modz, "SL Model" = slm.mod)
 modelsummary(modz,
              shape = term ~ model + statistic,
              stars = TRUE,
-             
              output = "kableExtra") %>%
   kable_styling(position = "center")
 
 ```
 
-The SLM is a good middle ground between the PO model (too constrained) and the GOL (too many parameters): it relaxes the strict proportionality constraint without requiring a full set of threshold-specific coefficients.
+The SLM is another good middle ground between the PO model (too constrained) and the GOL (too many parameters): it relaxes the strict proportionality constraint without requiring a full set of threshold-specific coefficients. But it can be really difficult to work with, and a lot of readers/reviewers might not really understand what's happening with your model. So it's an option to consider, but I tend to use it more as a diagnostic tool than a model that plays a starring role in my papers.
+
+The SLM includes both predictors with a single coefficient but also estimates the $\phi_j$ parameters (which are not shown in the table). The GOL includes both predictors with threshold-specific coefficients, so it has more rows for x2 than the others. And keep in mind that this table isn't even showing all of the parameters estimated in the SLM. Yikes!
+
+To make it easier to compare the models, we can make a plot of the coefficients across models. This will help us see how the estimates for each predictor differ across the different specifications.
+
+```{r}
+#| label: compare-mods
+
+# make plot comparing coefficients across models in modz
+
+mapz <- c(
+          "x2:2"           = "x2 at medium|high",
+          "x2:1"           = "x2 at low|medium",
+          "x2"             = "x2",
+          "x1:2"           = "x1 at medium|high",
+          "x1:1"           = "x1 at low|medium",
+          "x1"             = "x1",
+          "(Intercept):2"  = "medium|high cutpoint",
+          "(Intercept):1"  = "low|medium cutpoint",
+          "medium|high"    = "medium|high cutpoint",
+          "low|medium"     = "low|medium cutpoint",
+          "(Intercept)"    = "SLM Intercept"
+          )
+
+modelplot(modz,
+          coef_map = mapz)
+
+```
+
+Keep in mind, too, that the SLM model doesn't *really* appear appropriately in this plot (or in the table) because it doesn't have the same structure as the other models. The SLM has a single coefficient for each predictor, but it also has the $\phi_j$ parameters that scale those coefficients at each threshold. So the SLM's single coefficient for x1 is not directly comparable to the threshold-specific coefficients in the GOL or PPO, and the SLM's single coefficient for x2 is not directly comparable to the single coefficients in the PO and PPO. The SLM is a different beast altogether, so it's best to interpret its coefficients in the context of its own structure rather than trying to compare them directly to the other models.
 
 #### Multinomial Logit as a Fallback
 
@@ -583,7 +657,7 @@ If the proportional odds assumption is violated severely enough that even the PP
 
 ### What It Is
 
-The multinomial logit model (MNL) — the standard model for nominal outcomes with three or more unordered categories — rests on a structural assumption called the **independence of irrelevant alternatives** (IIA). It's one of the most debated assumptions in the discrete choice literature, and understanding it well helps you make better decisions about when to use the MNL and when to consider alternatives.
+The multinomial logit model (MNL) is the standard model for nominal outcomes with three or more unordered categories. It rests on a structural assumption called the **independence of irrelevant alternatives** (IIA). It's one of the most debated assumptions in the discrete choice literature, and understanding it well helps you make better decisions about when to use the MNL and when to consider alternatives.
 
 The IIA assumption says that the odds of choosing alternative $j$ over alternative $k$ depend only on the characteristics of $j$ and $k$ — not on the characteristics of any other alternative in the choice set. Formally, for any two alternatives $j$ and $k$:
 
@@ -591,35 +665,51 @@ $$\frac{P(Y = j)}{P(Y = k)} = \frac{e^{\mathbf{x}^\top\boldsymbol{\beta}_j}}{e^{
 
 This ratio doesn't involve the parameters for any other alternative. Adding a new alternative $m$ to the choice set doesn't change the relative odds of $j$ versus $k$.
 
-The most famous illustration of why this can be problematic is the **red bus / blue bus** problem, due to Debreu (1960). Suppose a commuter currently chooses between driving a car and taking a red bus with equal probability — the odds are 1:1. Now a blue bus service identical to the red bus in every respect is introduced. The IIA assumption implies that the odds of car versus red bus remain 1:1 after the blue bus is introduced. So the commuter ends up with probabilities 1/3 car, 1/3 red bus, 1/3 blue bus. But this is absurd: the commuter is presumably indifferent between the two buses and should end up at 1/2 car, 1/4 red bus, 1/4 blue bus.
+The most famous illustration of why this can be problematic is the **red bus/blue bus** problem, derived from @debreu1960 (which was actually a book review, believe it or not!). Suppose a commuter currently chooses between driving a car and taking a red bus with equal probability (so the odds are 1:1). Now a blue bus service identical to the red bus in every respect is introduced. The IIA assumption implies that the odds of car versus red bus remain 1:1 after the blue bus is introduced. So the commuter ends up with probabilities 1/3 car, 1/3 red bus, 1/3 blue bus. But this is absurd: the commuter is presumably indifferent between the two buses and should end up at 1/2 car, 1/4 red bus, 1/4 blue bus.
 
-The MNL inflated the car probability reduction because it treated the two buses as independent alternatives rather than near-perfect substitutes.
+::: question
+Right. So it makes no sense to think of the choice between a blue bus and a red bus as equivalent to the choice between driving a car and riding the bus?
+:::
+
+Exactly. Which means the MNL inflated the bus probability because it treated the two buses as independent alternatives rather than near-perfect substitutes.
 
 ### When Does IIA Matter?
 
-The red bus / blue bus scenario is a deliberately extreme case. In most political science applications, the IIA assumption matters less dramatically, but it can still produce misleading results when your outcome categories are close substitutes for each other.
+The red bus/blue bus scenario is a deliberately extreme case. In most political science applications, the IIA assumption matters less dramatically, but it can still produce misleading results when your outcome categories are close substitutes for each other.
 
-**Examples where IIA is likely violated:** - Vote choice among candidates from the same ideological camp (left-wing voters choosing between two left parties) - Coalition preferences among parties with overlapping platforms - Policy preferences among options that share many features
+**Examples where IIA is likely violated:**
 
-**Examples where IIA is less likely to matter:** - Choosing among outcome categories that are clearly distinct (e.g., different types of political regime) - Outcomes where the full choice set is fixed and well-defined - When the IIA-violating alternative is not present in your data
+- Vote choice among candidates from the same ideological camp (left-wing voters choosing between two left parties)
+- Coalition preferences among parties with overlapping platforms
+- Policy preferences among options that share many features
 
-The crucial question is not "does IIA technically hold?" but "does the violation of IIA materially affect the coefficients or predictions I care about?" A small IIA violation with negligible consequences is less worrying than a modest violation in a model whose policy implications depend on substitution patterns.
+**Examples where IIA is less likely to matter:**
+
+- Choosing among outcome categories that are clearly distinct (e.g., different types of political regime)
+- Outcomes where the full choice set is fixed and well-defined
+- When the IIA-violating alternative is not present in your data
+
+::: question
+I see. So this seems like an assumption we should address with research design, not with statistical diagnostics.
+:::
+
+Honestly, it's probably both. Sometimes, it's pretty obvious that the alternatives aren't independent. In those cases, we know to be on the lookout for this kind of problem. But we *can* also test our models for evidence. The crucial question is not "does IIA technically hold?" but "does the violation of IIA materially affect the coefficients or predictions I care about?" A small IIA violation with negligible consequences is less worrying than a modest violation in a model whose policy implications depend on substitution patterns.
 
 ### Testing for IIA
 
 ::: question
-Can you just test whether IIA holds, and move on if it passes?
+Okay, so you just test whether IIA holds, and move on if it passes?
 :::
 
-This is where things get uncomfortable. The two most widely used tests — the **Hausman-McFadden test** and the **Small-Hsiao test** — are both known to be unreliable. They can fail to detect genuine IIA violations (low power) and can reject IIA when it actually holds (poor size control), particularly in samples of the size typical in political science research. The Hausman-McFadden test can even produce negative test statistics, which is incoherent for a $\chi^2$ statistic.
+Not really. This is where things get uncomfortable. The two most widely used tests — the **Hausman-McFadden test** and the **Small-Hsiao test** — are both known to be unreliable. They can fail to detect genuine IIA violations (low power) and can reject IIA when it actually holds (poor size control), particularly in samples of the size typical in political science research. The Hausman-McFadden test can even produce negative test statistics, which is incoherent for a $\chi^2$ statistic.
 
 Both tests work by comparing a full MNL (all alternatives) to a restricted MNL (with one alternative removed), under the logic that if IIA holds, the coefficients should be the same in both models. The problem is that the restricted model uses a non-random subsample of the data (observations that chose the removed alternative are dropped), which introduces selection bias into the comparison.
 
-```{r iia-test, eval=FALSE}
+```{r}
+#| label: iia-test
 
 # the Hausman-McFadden test is available via the mlogit package
 # shown here for illustration — interpret cautiously
-library(mlogit)
 
 mn.mlogit  <- mlogit(party ~ 1 | lr + ru,
                      data   = mlogit.data(mn.df,
@@ -637,7 +727,7 @@ mn.restrict <- mlogit(party ~ 1 | lr + ru,
 
 # Hausman test (from mlogit)
 # a positive statistic favors IIA; negative statistic is a known failure mode
-hmftest(mn.mlogit, mn.restrict)
+#hmftest(mn.mlogit, mn.restrict)
 
 ```
 
