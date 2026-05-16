@@ -24,6 +24,13 @@ knit: (function(input, ...) {
   })
 ---
 
+```{=html}
+<!-- 
+Need to render this one in the consule instead of in RStudio because of the way the `knit` function is set up:
+USE: rmarkdown::render("glm_assumptions.Rmd", envir = new.env())
+-->
+```
+
 ```{r setup, include=FALSE}
 
 knitr::opts_chunk$set(
@@ -581,6 +588,8 @@ slm.osm$phi %>%  # check the phi parameters for monotonicity
   kable(,
         digits = 3,
         caption = "SLM Phi Check")
+
+
 ```
 
 This shows us that our $\phi$ parameter **is** between 0 and 1, which is a good sign that our ordering of the outcome categories is supported by the data. If $\phi$ had been greater than 1 or less than 0, that would have been a red flag that our assumed ordering might be wrong.
@@ -594,7 +603,7 @@ Good catch. It means that the model might not be able to distinguish between the
 ```{r}
 #| label: osm-summary
 
-summary(slm.osm)
+summary(slm.osm, data = vio.df)
 
 ```
 
@@ -647,9 +656,15 @@ modelplot(modz,
 
 Keep in mind, too, that the SLM model doesn't *really* appear appropriately in this plot (or in the table) because it doesn't have the same structure as the other models. The SLM has a single coefficient for each predictor, but it also has the $\phi_j$ parameters that scale those coefficients at each threshold. So the SLM's single coefficient for x1 is not directly comparable to the threshold-specific coefficients in the GOL or PPO, and the SLM's single coefficient for x2 is not directly comparable to the single coefficients in the PO and PPO. The SLM is a different beast altogether, so it's best to interpret its coefficients in the context of its own structure rather than trying to compare them directly to the other models.
 
-#### Multinomial Logit as a Fallback
+::: question
+So it seems like the SLM is a neat trick for diagnosing whether the ordering of the outcome categories is supported by the data. But it also seems really hard to interpret the findings when it comes to hypothesis testing.
+:::
 
-If the proportional odds assumption is violated severely enough that even the PPO or SLM don't fit well, multinomial logit treats the outcome as completely unordered — no thresholds, no proportionality constraint, just a separate binary logit for each category versus a reference. This loses the ordinal structure of the outcome entirely, but it's at least honest about what the model can and can't tell you.
+That's right. This is the main reason why I like to use this as a tool to help me understand my data and my model, but I don't usually put it in the main text of a paper. It's a bit too much for most readers to digest, and it can be hard to explain in a way that doesn't leave people scratching their heads. But it's a great tool to have in your back pocket when you're trying to figure out what's going on with your ordinal outcome. It can also be used to justify decisions you make about how to specify your model, which can be helpful when you have reviewers who are skeptical about your choice to relax the PO assumption.
+
+#### When All Else Fails
+
+If the proportional odds assumption is violated severely enough that even the PPO or SLM don't fit well, multinomial logit (MNL) is a pretty good fallback option. An MNL model treats the outcome as completely unordered: no thresholds, no proportionality constraint, no scaling parameters. Instead, MNL is just a system of separate binary logits for each category (well, $j-1$ logits) versus a reference. This loses the ordinal structure of the outcome entirely, but it's at least honest about what the model can and can't tell you.
 
 ------------------------------------------------------------------------
 
@@ -711,34 +726,38 @@ Both tests work by comparing a full MNL (all alternatives) to a restricted MNL (
 # the Hausman-McFadden test is available via the mlogit package
 # shown here for illustration — interpret cautiously
 
-mn.mlogit  <- mlogit(party ~ 1 | lr + ru,
-                     data   = mlogit.data(mn.df,
-                                          choice = "party",
-                                          shape  = "wide"),
-                     reflevel = "A")
+# reshape the data
+data_full <- mlogit.data(mn.df, choice = "party", shape = "wide")
+mn.df_filtered <- mn.df %>% filter(party != "D")
+data_restrict <- mlogit.data(mn.df_filtered, choice = "party", shape = "wide")
 
-# restricted model excluding party D
-mn.restrict <- mlogit(party ~ 1 | lr + ru,
-                      data      = mlogit.data(
-                        mn.df %>% filter(party != "D"),
-                        choice = "party",
-                        shape  = "wide"),
-                      reflevel = "A")
+# fit the full model
+mn.mlogit <- mlogit(party ~ 1 | lr + ru, data = data_full, reflevel = "A")
 
-# Hausman test (from mlogit)
-# a positive statistic favors IIA; negative statistic is a known failure mode
-#hmftest(mn.mlogit, mn.restrict)
+# fit the restricted model
+mn.restrict <- mlogit(party ~ 1 | lr + ru, data = data_restrict, reflevel = "A")
+
+# Hausman-McFadden test
+hmftest(mn.mlogit, mn.restrict)
 
 ```
 
-Given these limitations, current practice is to treat IIA as a theoretical rather than an empirical question. Before running any test:
+::: question
+So, we fail the IIA? Or not?
+:::
+
+In this case, we don't fail the test, since we don't reject the null hypothesis. But if we *had* failed the test, it's not immediately clear what to do with that. Given the limitations of our tests, current practice is to treat IIA as a theoretical rather than an empirical question. Before running any test:
 
 1.  **Ask whether your outcome categories are plausible substitutes.** If they are, IIA is likely violated and an alternative model is warranted regardless of what a test says.
 2.  **Use the test as supporting evidence**, not as the primary justification for your model choice. If the test doesn't reject IIA, that's weak evidence in favor — not a green light to proceed without further thought.
 
 ### Stereotype Logit as a Diagnostic
 
-Even when you're committed to MNL, it's worth estimating the **stereotype logit model (SLM)** as a diagnostic. The SLM's $\phi$ parameters test whether the outcome categories have an empirical ordering. If they're monotonically increasing, that's evidence of underlying ordinality — which might mean an ordered logit fits better than MNL. If they're out of order or collapse categories together (consecutive $\phi$ values equal to each other), that's evidence the categories don't have a meaningful ordering and MNL is appropriate.
+::: question
+This again?
+:::
+
+Absolutely. It's my favorite appendix model, so of course we're going to use it as a diagnostic wherever we can. In this case, though, it really can be helpful. Even when you're committed to MNL, it's worth estimating the **stereotype logit model (SLM)** as a diagnostic. The SLM's $\phi$ parameters test whether the outcome categories have an empirical ordering. If they're monotonically increasing, that's evidence of underlying ordinality. This might mean an ordered logit fits better than MNL. If they're out of order or collapse categories together (consecutive $\phi$ values equal to each other), that's evidence the categories don't have a meaningful ordering and MNL is appropriate.
 
 ```{r slm-diagnostic}
 
@@ -760,9 +779,15 @@ print(round(slm.coefs[grep("Intercept", names(slm.coefs))], 3))
 
 If the $\phi$ estimates are not monotonically ordered, the SLM is suggesting that your categories don't have a clear empirical ordering — supporting the use of MNL.
 
+::: question
+These are supposed to be bounded by zero and one, right? So we fail?
+:::
+
+That's right. If the $\phi$ parameters are not between 0 and 1, that's a strong signal that the ordering of the categories is not supported by the data. In that case, an ordered logit model would be inappropriate, and MNL would be a better choice. Even if the $\phi$ parameters are between 0 and 1 but not monotonically increasing, that would still suggest that the categories don't have a clear ordinal structure, which again would support using MNL.
+
 ### Alternatives to MNL When IIA Is Violated
 
-When IIA is a genuine concern, you have several alternatives. All of them are more complex than MNL and require additional data or stronger assumptions:
+When IIA is a genuine concern, you have several alternatives. All of them are more complex than MNL and require additional data or stronger assumptions. We won't go through them all now, but you'll want to explore these options is your model is truly suffering from IIA violation:
 
 **Nested logit:** Groups alternatives into nests, with IIA holding within nests but not across them. A commuter who takes transit chooses first among transit options (bus, subway), then among driving options. The nesting structure must be specified by the researcher and is a strong theoretical assumption in itself. The `nestedLogit` package is one helpful tool for this solution.
 
@@ -770,13 +795,19 @@ When IIA is a genuine concern, you have several alternatives. All of them are mo
 
 **Conditional logit with alternative-specific variables:** When your data include attributes of the alternatives themselves (not just characteristics of the chooser), the conditional logit model handles substitution patterns more flexibly than MNL. You can also accomplish this using tools in the `mlogit` package.
 
-In practice, most political science applications of nominal DVs use MNL because the alternatives above require data structures that aren't common in observational survey research. The honest approach is to: (1) make the case on theoretical grounds that your outcome categories are not close substitutes; (2) report the IIA tests as supplementary evidence while noting their limitations; and (3) discuss what IIA violation would imply for your substantive conclusions.
+In practice, most political science applications of nominal DVs use MNL because the alternatives above require data structures that aren't common in observational survey research. The honest approach is to:
+
+1.  make the case on theoretical grounds that your outcome categories are not close substitutes;
+2.  report the IIA tests as supplementary evidence while noting their limitations; and
+3.  discuss what IIA violation would imply for your substantive conclusions.
 
 ------------------------------------------------------------------------
 
 ## Summary
 
-```{r summary-table, results='asis', class.source = "fold-hide"}
+```{r}
+#| label: summary-table
+#| results: 'asis'
 
 summ.tbl <- data.frame(
   Issue = c(
