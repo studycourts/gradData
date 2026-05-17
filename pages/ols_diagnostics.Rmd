@@ -1,22 +1,18 @@
 ---
 title: "OLS: Diagnostics"
-aauthor: "Rebecca Gill"
+author: "Rebecca Gill"
 date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
 output:
   bookdown::html_document2:
-    mathjax: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
     number_sections: FALSE
-    toc: true
-    toc_depth: 3
-    toc_float:
-      collapsed: true
-    code_folding: show
+    toc: false
+    code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
-
 bibliography: site_refs.bib
 csl: gill_apsr.csl
-
 knit: (function(input, ...) {
     rmarkdown::render(
       input,
@@ -25,9 +21,9 @@ knit: (function(input, ...) {
   })
 ---
 
-```{css, echo = FALSE}
+```{css, echo=FALSE}
 
-/* This code defines the question div */
+/* define the divs */
 
 .question {
   border: 1px solid #cccccc;
@@ -37,14 +33,16 @@ knit: (function(input, ...) {
   margin: 1em 0;
 }
 
-/* This code defines the highlighted "mark" tag */
-
-mark {
-  background-color: LemonChiffon;
-  color: black;
+.note {
+  padding: 1em 1em 1em 1em;
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  border-radius: .25rem;
+  border-left: 0.3rem solid #007bff; /* Color for 'note' type */
+  background-color: #f8f9fa;
 }
 
-/* This code makes the tables a little nicer. */
+/* make tables & captions prettier */
 
 table, td, th {
   border: none;
@@ -54,38 +52,48 @@ table, td, th {
   margin-right: auto;
   margin-top: 1em;
   margin-bottom: 1em;
-  max-width:80%;
-  white-space:nowrap;
+  max-width: 80%;
+  width: auto !important;    /* overrides Bootstrap's width: 100% */
+  white-space: nowrap;
 }
 
-```
+caption, .caption {
+  font-weight: bold;
+}
 
-```{=html}
-<!-- Needs editing
-DONE: fix title and yaml
-TODO: 
-- finish troubleshooting starting with chunk [hcse]
-  - use library(estimatr) and lm_robust() with option se_type = "HC1"
-  - put that version of the model in the list instead of the coeftest object
-- check length of H1 headers for TOC
-- remove mark tags
-- check flow
-- hide big code chunks and add blockquote to show code
--->
 ```
 
 ```{r}
 #| label: setup
 #| include: false
 
-knitr::opts_chunk$set(echo = TRUE,
-                      message = FALSE,
-                      warning = FALSE,
-                      cache = FALSE,
-                      fig.align = "center")
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center",
+  fig.topcaption = TRUE
+)
 
 options(scipen = 999)
+options(digits = 4)
+options(knitr.kable.NA = "")     
 
+```
+
+::: note
+This page is built in R Markdown. Most code chunks are hidden by default, but you can click 'show' to see the code that loads the libraries and generates the data, figures, and tables. The code is also available in my [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
+:::
+
+```{=html}
+<!-- Needs editing
+DONE: fix title and yaml
+TODO: 
+- check length of H1 headers for TOC
+- remove mark tags
+- check flow
+-->
 ```
 
 ```{r}
@@ -572,13 +580,18 @@ All three tests reject the null of homoscedasticity. The GQ test suggests that t
 hc1.clean <- coeftest(ols.clean,
                       vcov = vcovHC(ols.clean, type = "HC1"))
 
-htmlreg(list("OLS" = ols.clean,
-        format        = "apsr",
-             "HC1 Robust SE" = hc1.clean),
-        caption       = "OLS vs. HC-Robust Standard Errors",
-        caption.above = TRUE,
-        single.row    = TRUE)
+hc1_se <- hc1.clean[, "Std. Error"]
+hc1_p  <- hc1.clean[, "Pr(>|t|)"]
 
+htmlreg(
+  list(ols.clean, ols.clean),
+  custom.model.names = c("OLS", "HC1 Robust SE"),
+  override.se        = list(NULL, hc1_se),
+  override.pvalues   = list(NULL, hc1_p),
+  caption            = "OLS vs. HC-Robust Standard Errors",
+  caption.above      = TRUE,
+  single.row         = TRUE
+)
 ```
 
 > Robust standard errors do *not* fix the heteroscedasticity — they fix the inference *in the presence of* heteroscedasticity. This is an important distinction. Your point estimates are unchanged; you're just getting honest uncertainty estimates around them.
@@ -659,7 +672,11 @@ First, let's compare the misspecified baseline to the polynomial-corrected model
 ```{r}
 #| label: anova-test
 
-anova(ols.base, ols.clean, test = "F")
+ols.base2 <- lm(y ~ x_1 + x_2 + x_3,     # drop obs not in ols.clean
+               data = sim.df,
+               subset = names(residuals(ols.clean)))
+
+anova(ols.base2, ols.clean, test = "F")
 
 ```
 

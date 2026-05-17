@@ -27,7 +27,14 @@ knit: (function(input, ...) {
 ```{=html}
 <!-- 
 Need to render this one in the consule instead of in RStudio because of the way the `knit` function is set up:
-USE: rmarkdown::render("glm_assumptions.Rmd", envir = new.env())
+USE: 
+
+rmarkdown::render(
+  "glm_assumptions.Rmd", 
+  output_dir = "../docs", 
+  envir = new.env()
+)
+
 -->
 ```
 

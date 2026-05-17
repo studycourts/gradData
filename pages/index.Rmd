@@ -1,0 +1,172 @@
+---
+title: "Regression Diagnostics: Supplementary Materials"
+subtitle: "UNLV Political Science — Graduate Methods Series"
+author: "Rebecca Gill"
+date: "`r Sys.Date()`"
+output:
+  bookdown::html_document2:
+    number_sections: FALSE
+    toc: false
+    self_contained: true
+    base_format: rmarkdown::html_document
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_dir = "../docs"
+    )
+  })
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{css, echo=FALSE}
+/* ── Shared styles (matching existing pages) ─────────────────────────────── */
+.note {
+  padding: 1em;
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  border-radius: .25rem;
+  border-left: 0.3rem solid #007bff;
+  background-color: #f8f9fa;
+}
+
+table, td, th {
+  border: none;
+  padding-left: 1em;
+  padding-right: 1em;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
+  max-width: 80%;
+  width: auto !important;
+  white-space: nowrap;
+}
+caption, .caption {
+  font-weight: bold;
+}
+
+/* ── Index-specific styles ───────────────────────────────────────────────── */
+
+/* Section headers */
+.section-header {
+  margin-top: 2em;
+  margin-bottom: 0.25em;
+  padding-bottom: 0.3em;
+  border-bottom: 2px solid #dee2e6;
+  font-size: 1.4em;
+}
+
+/* Page cards */
+.page-card {
+  border: 1px solid #dee2e6;
+  border-left: 0.35rem solid #007bff;   /* blue for OLS */
+  background-color: #f8f9fa;
+  padding: 0.9em 1.25em;
+  border-radius: .25rem;
+  margin: 0.75em 0 1em 0;
+}
+.page-card.glm {
+  border-left-color: #20a87e;           /* teal/green for GLM */
+}
+.page-card h4 {
+  margin-top: 0;
+  margin-bottom: 0.35em;
+  font-size: 1.05em;
+}
+.page-card h4 a {
+  color: #2c3e50;
+  text-decoration: none;
+}
+.page-card h4 a:hover {
+  text-decoration: underline;
+  color: #007bff;
+}
+.page-card p {
+  margin-bottom: 0;
+  font-size: 0.95em;
+  color: #444;
+}
+
+/* "Coming soon" placeholder style */
+.page-card.soon {
+  border-left-color: #adb5bd;
+  background-color: #fdfdfd;
+  color: #888;
+  font-style: italic;
+}
+.page-card.soon h4 a {
+  color: #888;
+  pointer-events: none;
+}
+```
+
+## About This Resource {.unnumbered}
+
+These pages started as explanations I kept writing into homework assignments for UNLV's graduate methods sequence. After a while it made more sense to pull that scaffolding into its own resource — something you can return to throughout the course without digging through assignment PDFs.
+
+The pages are organized around two modeling frameworks: ordinary least squares (OLS) regression and generalized linear models (GLMs). Each page covers a specific diagnostic topic in enough depth to make you a confident, careful user of these models. You'll notice a recurring voice throughout — a curious, sharp new graduate student asking questions you're probably thinking. That's you! These pages don't assume that you're a mathematician or a coding whiz. The goal isn't to turn you into a statistician. This is just here to give you the intuition and the practical tools to do this work well and to understand what you're doing when you do it.
+
+This resource is a work in progress, so please be patient. If there's specific content you'd like to see here, consider dropping me a line at and will grow over the coming months. Eventually the plan is to organize it into a proper e-book structure, but for now, think of it as a set of reference pages you can jump into as needed.
+
+::: note
+**Note:** All pages are built in R Markdown, and most code chunks are hidden by default. Click "Code" at the top of any page and select "Show All Code" to see everything, or click the "Show" button above individual outputs to see the code for that specific result. The full source is also available in the [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
+:::
+
+------------------------------------------------------------------------
+
+## OLS Regression {.unnumbered .section-header}
+
+::: page-card
+<h4><a href="ols_diagnostics.html">OLS Diagnostics: A Principled Workflow</a></h4>
+
+<p>Every OLS model rests on a set of assumptions, and when those assumptions are violated, your estimates, standard errors, and inferences can all go wrong in different ways. This page gives you a clear, ordered workflow for checking those assumptions — one that's principled enough to follow every time, with a rationale for why each step comes where it does.</p>
+:::
+
+::: page-card
+<h4><a href="ols_multicollinearity.html">Multicollinearity</a></h4>
+
+<p>Multicollinearity — high correlation among predictor variables — doesn't bias your estimates, but it makes them imprecise and hard to interpret. This page covers how to diagnose the problem, what it actually does to your model, and what to do about it, including a practical introduction to principal components factor analysis (PCF) as a solution.</p>
+:::
+
+::: page-card
+<h4><a href="ols_outliers.html">Outliers and Influential Observations</a></h4>
+
+<p>Not all outliers are created equal. An observation can be unusual in its outcome, in its predictor values, or in the influence it exerts on your fitted model — and those are very different problems. This page works through the distinctions, introduces the main diagnostic tools, and discusses what to actually do when you find something problematic.</p>
+:::
+
+------------------------------------------------------------------------
+
+## Generalized Linear Models {.unnumbered .section-header}
+
+::: {.page-card .glm}
+<h4><a href="glm_residuals.html">GLM Residuals</a></h4>
+
+<p>The residuals you're used to from OLS don't behave the way you'd expect once you move to GLMs — the outcome isn't normal, the variance isn't constant, and the familiar intuitions break down. This page traces through what residuals mean in the GLM context, why the obvious alternatives fall short, and why randomized quantile residuals (and the DHARMa package) are the current best practice.</p>
+:::
+
+::: {.page-card .glm}
+<h4><a href="glm_model_fit.html">Model Fit and Deviance</a></h4>
+
+<p>GLMs don't give you an R² — they give you deviance, and once you understand what deviance is, most of the goodness-of-fit apparatus for GLMs falls into place. This page covers deviance, pseudo-R² statistics, information criteria, likelihood ratio tests, and posterior predictive checks, with a note on how these tools shift slightly for mixed models.</p>
+:::
+
+::: {.page-card .glm}
+<h4><a href="glm_outliers_nonlinearity.html">Outliers and Nonlinearity</a></h4>
+
+<p>In GLMs, outliers and nonlinearity have an inconvenient relationship: each can make the other harder to detect. This page works through both problems together, using quantile residuals and DHARMa simulation-based diagnostics throughout — the same tools introduced in the residuals page, now applied to detecting influence and nonlinear patterns in non-Gaussian models.</p>
+:::
+
+::: {.page-card .glm}
+<h4><a href="glm_assumptions.html">Model-Specific Assumptions</a></h4>
+
+<p>Beyond the general GLM assumptions, some model families carry their own structural requirements. This page covers two: the proportional odds assumption (specific to ordered logit and probit models, and frequently violated in the literature) and the independence of irrelevant alternatives (IIA) assumption (specific to multinomial logit, and frequently misunderstood). Both have direct implications for model specification and interpretation.</p>
+:::
+
+::: {.page-card .glm}
+<h4><a href="glm_mixed_diag.html">Diagnosing Mixed Models</a></h4>
+
+<p>Mixed (multilevel, hierarchical) models are the right tool when your data have a clustered structure, but diagnosing them requires attention at two levels simultaneously: the observation level and the group level. This page covers the full diagnostic workflow — from checking whether a mixed model is warranted at all, through model-building decisions, to the observation- and group-level checks that should accompany every fitted mixed GLM.</p>
+:::
