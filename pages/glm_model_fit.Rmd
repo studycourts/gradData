@@ -2,21 +2,17 @@
 title: "GLM: Goodness of Fit and Deviance"
 author: "Rebecca Gill"
 date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
 output:
   bookdown::html_document2:
-    mathjax: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
     number_sections: FALSE
-    toc: true
-    toc_depth: 3
-    toc_float:
-      collapsed: true
+    toc: false
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
-
 bibliography: site_refs.bib
 csl: gill_apsr.csl
-
 knit: (function(input, ...) {
     rmarkdown::render(
       input,
@@ -25,24 +21,9 @@ knit: (function(input, ...) {
   })
 ---
 
-```{r setup, include=FALSE}
+<!-- Add status notes here -->
 
-knitr::opts_chunk$set(
-  echo      = TRUE,
-  message   = FALSE,
-  warning   = FALSE,
-  cache     = FALSE,
-  fig.align = "center"
-)
-
-options(scipen = 999)
-options(digits = 4)
-
-```
-
-::: {style="text-align: center;"}
-[![The Data Department Comics \@tddcomics](https://scontent-lax7-1.xx.fbcdn.net/v/t1.6435-9/157827995_5515365488503570_2443914395437369774_n.jpg?stp=dst-jpg_s1080x2048_tt6&_nc_cat=111&ccb=1-7&_nc_sid=536f4a&_nc_ohc=y5QPlK9vT6EQ7kNvwH_Un9B&_nc_oc=Adqy1FLBecYAevrNVrJscVavqTLCNwwQhNGZYOYO55FD_aFLBiLaogNkhjOxce60eXI&_nc_zt=23&_nc_ht=scontent-lax7-1.xx&_nc_gid=XbmuKAypeArSHF5JQrZ7MA&_nc_ss=7b289&oh=00_Af5y1YOX935TPxMEMCnPHYs0y5sdDoVEDtKv-M_DMl_B4Q&oe=6A2F19FC){width="50%"}](https://www.instagram.com/tddcomics/)
-:::
+<p><a href="index.html">← Back to Index</a></p>
 
 ```{css, echo=FALSE}
 
@@ -86,8 +67,31 @@ caption, .caption {
 
 ```
 
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center",
+  fig.topcaption = TRUE
+)
+
+options(scipen = 999)
+options(digits = 4)
+options(knitr.kable.NA = "")     
+
+```
+
 ::: note
-NOTE: This page is built in R Markdown. Most code chunks are hidden by default. To see all the R code, click "Code" at the top of the page and select "Show All Code". To see the code used to generate a specific output, you can click the "Show" button above the output to see the code that generated that output. The full R Markdown code is also available in my [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
+This page is built in R Markdown. Most code chunks are hidden by default, but you can click 'show' to see the code that loads the libraries and generates the data, figures, and tables. The code is also available in my [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
+:::
+
+::: {style="text-align: center;"}
+[![The Data Department Comics \@tddcomics](https://scontent-lax7-1.xx.fbcdn.net/v/t1.6435-9/157827995_5515365488503570_2443914395437369774_n.jpg?stp=dst-jpg_s1080x2048_tt6&_nc_cat=111&ccb=1-7&_nc_sid=536f4a&_nc_ohc=y5QPlK9vT6EQ7kNvwH_Un9B&_nc_oc=Adqy1FLBecYAevrNVrJscVavqTLCNwwQhNGZYOYO55FD_aFLBiLaogNkhjOxce60eXI&_nc_zt=23&_nc_ht=scontent-lax7-1.xx&_nc_gid=XbmuKAypeArSHF5JQrZ7MA&_nc_ss=7b289&oh=00_Af5y1YOX935TPxMEMCnPHYs0y5sdDoVEDtKv-M_DMl_B4Q&oe=6A2F19FC){width="50%"}](https://www.instagram.com/tddcomics/)
 :::
 
 ```{r}

@@ -7,10 +7,7 @@ header-includes:
 output:
   bookdown::html_document2:
     number_sections: FALSE
-    toc: true
-    toc_depth: 3
-    toc_float:
-      collapsed: true
+    toc: false
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
@@ -38,22 +35,7 @@ rmarkdown::render(
 -->
 ```
 
-```{r setup, include=FALSE}
-
-knitr::opts_chunk$set(
-  echo      = TRUE,
-  message   = FALSE,
-  warning   = FALSE,
-  cache     = FALSE,
-  fig.align = "center",
-  fig.topcaption = TRUE
-)
-
-options(scipen = 999)
-options(digits = 4)
-options(knitr.kable.NA = "")
-
-```
+<p><a href="index.html">← Back to Index</a></p>
 
 ```{css, echo=FALSE}
 
@@ -94,6 +76,25 @@ table, td, th {
 caption, .caption {
   font-weight: bold;
 }
+
+```
+
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center",
+  fig.topcaption = TRUE
+)
+
+options(scipen = 999)
+options(digits = 4)
+options(knitr.kable.NA = "")     
 
 ```
 

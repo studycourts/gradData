@@ -164,6 +164,18 @@ This resource is a work in progress, so please be patient. If there's specific c
 :::
 
 ::: {.page-card .glm}
+<h4><a href="glm_separability_convergence.html">Separability and Convergence Issues</a></h4>
+
+<p>When working with limited dependent variables, you may encounter two related problems: separability (perfect prediction of the outcome by one or more predictors) and convergence issues (failure of the model-fitting algorithm to find a solution). This page covers how to diagnose these problems, what they do to your model, and how to fix them — including practical introductions to Firth's penalized likelihood method and Bayesian estimation as solutions for separation.</p>
+:::
+
+::: {.page-card .glm}
+<h4><a href="glm_overdispersion.html">Overdispersion</a></h4>
+
+<p>In GLM, dispersion refers to the relationship between the mean and the variance of the outcome. When that relationship is misspecified, your standard errors and inferences can be way off. This is often an issue in models of count data. This page covers how to detect overdispersion, what it does to your model, and how to fix it — including a practical introduction to negative binomial regression as a solution for count data.</p>
+:::
+
+::: {.page-card .glm}
 <h4><a href="glm_assumptions.html">Model-Specific Assumptions</a></h4>
 
 <p>Beyond the general GLM assumptions, some model families carry their own structural requirements. This page covers two: the proportional odds assumption (specific to ordered logit and probit models, and frequently violated in the literature) and the independence of irrelevant alternatives (IIA) assumption (specific to multinomial logit, and frequently misunderstood). Both have direct implications for model specification and interpretation.</p>

@@ -21,6 +21,10 @@ knit: (function(input, ...) {
   })
 ---
 
+<!-- Add status notes here -->
+
+<p><a href="index.html">← Back to Index</a></p>
+
 ```{css, echo=FALSE}
 
 /* define the divs */

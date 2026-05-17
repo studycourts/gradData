@@ -7,11 +7,8 @@ header-includes:
 output:
   bookdown::html_document2:
     number_sections: FALSE
-    toc: true
-    toc_depth: 3
-    toc_float:
-      collapsed: true
-    code_folding: show
+    toc: false
+    code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
 bibliography: site_refs.bib
@@ -24,24 +21,13 @@ knit: (function(input, ...) {
   })
 ---
 
-```{r setup, include=FALSE}
+<!-- Add status notes here -->
 
-knitr::opts_chunk$set(
-  echo      = TRUE,
-  message   = FALSE,
-  warning   = FALSE,
-  cache     = FALSE,
-  fig.align = "center"
-)
-
-options(scipen = 999)
-options(digits = 4)
-
-```
+<p><a href="index.html">← Back to Index</a></p>
 
 ```{css, echo=FALSE}
 
-/* This code defines the question div */
+/* define the divs */
 
 .question {
   border: 1px solid #cccccc;
@@ -50,6 +36,17 @@ options(digits = 4)
   border-radius: 5px;
   margin: 1em 0;
 }
+
+.note {
+  padding: 1em 1em 1em 1em;
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  border-radius: .25rem;
+  border-left: 0.3rem solid #007bff; /* Color for 'note' type */
+  background-color: #f8f9fa;
+}
+
+/* make tables & captions prettier */
 
 table, td, th {
   border: none;
@@ -60,14 +57,40 @@ table, td, th {
   margin-top: 1em;
   margin-bottom: 1em;
   max-width: 80%;
+  width: auto !important;    /* overrides Bootstrap's width: 100% */
   white-space: nowrap;
+}
+
+caption, .caption {
+  font-weight: bold;
 }
 
 ```
 
-> Click 'show' to see the libraries used in this page.
+```{r}
+#| label: setup
+#| include: false
 
-```{r libs, class.source = "fold-hide"}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center",
+  fig.topcaption = TRUE
+)
+
+options(scipen = 999)
+options(digits = 4)
+options(knitr.kable.NA = "")     
+
+```
+
+::: note
+This page is built in R Markdown. Most code chunks are hidden by default, but you can click 'show' to see the code that loads the libraries and generates the data, figures, and tables. The code is also available in my [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
+:::
+
+```{r libs}
 
 P <- c(
   "knitr",          # rendering
@@ -78,6 +101,7 @@ P <- c(
   "lmtest",         # lrtest() for nested model comparison
   "MASS",           # glm.nb() for negative binomial
   "pscl",           # zeroinfl(), hurdle(), vuong()
+  "glmmTMB",        # alternative for ZINB models"
   "patchwork",      # combining ggplots
   "tidyverse"       # wrangling and ggplot2 — load last
 )
@@ -93,9 +117,7 @@ rm(P, pkg)  # clean up the mess
 
 ```
 
-> Click 'show' to see the data simulation code.
-
-```{r sims, class.source = "fold-hide"}
+```{r sims}
 
 set.seed(1975)   # for reproducibility
 
@@ -170,8 +192,7 @@ zip.mod <- pscl::zeroinfl(
   data = zip.df
 )
 
-# ── Simulation 4: Overdispersed AND zero-inflated data (ZINB) ─────────────────
-# the combination that requires the most complex model
+# sim 4: overdispersed AND zero-inflated data (ZINB) 
 
 p.zero.nb  <- plogis(-0.6 + 0.4 * x2)
 is.zero.nb <- rbinom(n, 1, p.zero.nb)
@@ -193,7 +214,7 @@ nb.zinb.wrong <- MASS::glm.nb(y ~ x1 + x2, data = zinb.df)
 
 ```
 
----
+------------------------------------------------------------------------
 
 ## Introduction
 
@@ -205,7 +226,7 @@ A related but distinct issue is **excess zeros**: more observations with a count
 
 This page works through both problems systematically. We start with the basics of the equidispersion assumption and what it looks like when it fails, move through the tools for detecting each problem, and end with a decision framework for choosing among the family of count models.
 
----
+------------------------------------------------------------------------
 
 ## The Equidispersion Assumption
 
@@ -234,7 +255,7 @@ cat("Ratio:   ", round(var(nb.df$y) / mean(nb.df$y), 3), "\n")
 
 A variance-to-mean ratio near 1 is consistent with equidispersion. Ratios substantially greater than 1 signal overdispersion. This is a quick first check, not a formal test — it doesn't condition on the covariates, so it can be misleading if the mean is highly variable across observations. But it's a useful starting point.
 
----
+------------------------------------------------------------------------
 
 ## Detecting Overdispersion
 
@@ -300,7 +321,7 @@ I ran all three overdispersion tests and they all say the data are overdispersed
 
 No — one well-chosen test is enough to establish the point. In practice, the `performance::check_overdispersion()` result (which gives you a test statistic and a $p$-value) is the most compact and conventional way to report it. Mention the quasiPoisson dispersion estimate alongside it to give readers a sense of the scale of the problem. The DHARMa plot is most useful for your own understanding and for presentations where a visual makes the issue vivid — you don't necessarily need to include it in a paper.
 
----
+------------------------------------------------------------------------
 
 ## Responding to Overdispersion
 
@@ -369,7 +390,7 @@ A $\theta$ estimate of around 1.5 is consistent with how we generated these data
 
 The LRT comparing Poisson to NB should be overwhelmingly significant here — the two models are nested (Poisson is NB with $\theta \rightarrow \infty$), and the data were genuinely generated by an NB process.
 
----
+------------------------------------------------------------------------
 
 ## Detecting Excess Zeros
 
@@ -491,7 +512,7 @@ DHARMa::testZeroInflation(sim.zip.wrong, plot = TRUE)
 
 ```
 
----
+------------------------------------------------------------------------
 
 ## Responding to Excess Zeros
 
@@ -531,8 +552,8 @@ The output has two sections: the count model (log-linear, same interpretation as
 
 Hurdle models take a different structural position. They assume:
 
-1. A binary process determines whether the count is zero or positive.
-2. Conditional on being positive, a truncated count model (Poisson or NB truncated at zero) determines the magnitude.
+1.  A binary process determines whether the count is zero or positive.
+2.  Conditional on being positive, a truncated count model (Poisson or NB truncated at zero) determines the magnitude.
 
 The key conceptual difference from the zero-inflated model is that in the hurdle model, *all* zeros come from the binary process — there's no mixing of structural and sampling zeros. The zero-inflation model allows sampling zeros to appear in both the binary and count components; the hurdle model draws a hard line.
 
@@ -589,20 +610,32 @@ lmtest::lrtest(nb.zinb.wrong, zinb.fit)
 
 The LRT comparing NB to ZINB tests whether the zero-inflation component is needed on top of the negative binomial's natural accommodation of overdispersion. A significant result means the extra zeros can't be fully explained by the NB's fat tail.
 
----
+------------------------------------------------------------------------
 
 ## Checking the Final Model
 
 Once you've chosen and fitted your count model, run the standard diagnostic checks to confirm the fit is adequate. DHARMa handles all count model types — Poisson, NB, ZIP, ZINB, and hurdle — via the same `simulateResiduals()` workflow:
 
 ```{r dharma-final, cache=TRUE}
-#| fig.cap: "DHARMa residuals for the ZIP model on zero-inflated data. Both the QQ plot (left) and the residual-vs-fitted plot (right) should look clean under a correctly specified model."
+#| fig.cap: "DHARMa residuals for the ZIP model on zero-inflated data."
 
 # DHARMa residuals for the ZIP model
-sim.zip <- DHARMa::simulateResiduals(zip.fit, n = 500, plot = FALSE)
-plot(sim.zip, main = "DHARMa Residuals — ZIP Model")
+
+# re-run using glmmTMB for better compatibility with DHARMa
+
+zip.tmb <- glmmTMB(
+  y ~ x1,                # Count model (before the | in pscl)
+  ziformula = ~ x2,      # Zero-inflation model (after the | in pscl)
+  family = poisson,      # Distribution
+  data = zip.df
+)
+
+sim.zip <- DHARMa::simulateResiduals(zip.tmb, n = 500, plot = FALSE)
+plot(sim.zip)
 
 ```
+
+Both the QQ plot (left) and the residual-vs-fitted plot (right) should look clean under a correctly specified model. If you see patterns in the residuals, you may need to revisit your model choice or consider additional covariates or random effects. Let's check the formal tests next.
 
 ```{r dharma-final-tests}
 
@@ -615,7 +648,7 @@ DHARMa::testZeroInflation(sim.zip)
 
 After fitting the correct model, all three tests should be non-significant: the residuals should be uniform, the dispersion should be consistent with the model, and the zero counts should match the model's predictions.
 
----
+------------------------------------------------------------------------
 
 ## The Count Model Decision Tree
 
@@ -661,6 +694,6 @@ kable(dec.tbl,
 
 One thing worth stating plainly: model selection in count data is iterative. Diagnosing overdispersion, then excess zeros, then checking the final model — and potentially looping back if the final model still doesn't fit — is the process, not a sign that you're doing something wrong. DHARMa's `testZeroInflation()` and `testDispersion()` on the final model are your best guide to whether you've arrived at an adequate specification.
 
----
+------------------------------------------------------------------------
 
 ## References

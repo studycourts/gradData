@@ -2,21 +2,17 @@
 title: "GLM: Separability and Convergence Issues"
 author: "Rebecca Gill"
 date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{amsmath}
 output:
   bookdown::html_document2:
-    mathjax: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
     number_sections: FALSE
-    toc: true
-    toc_depth: 3
-    toc_float:
-      collapsed: true
-    code_folding: show
+    toc: false
+    code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
-
 bibliography: site_refs.bib
 csl: gill_apsr.csl
-
 knit: (function(input, ...) {
     rmarkdown::render(
       input,
@@ -25,36 +21,13 @@ knit: (function(input, ...) {
   })
 ---
 
-```{r setup, include=FALSE}
+<!-- Add status notes here -->
 
-knitr::opts_chunk$set(
-  echo      = TRUE,
-  message   = FALSE,
-  warning   = FALSE,
-  cache     = FALSE,
-  fig.align = "center"
-)
-
-options(scipen = 999)
-options(digits = 4)
-
-```
-
-```{=html}
-<!-- Needs editing
-DONE: fix yaml header and page title
-TODO:
-- finish troubleshooting errors starting at "firth" chunk
-- fold big chunks and add blockquote > click 'show' to see ...
-- add more .question divs, banter, humor
-- shorten H1 headers for the TOC
-- add more transitions, context, interpretation
---->
-```
+<p><a href="index.html">← Back to Index</a></p>
 
 ```{css, echo=FALSE}
 
-/* This code defines the question div */
+/* define the divs */
 
 .question {
   border: 1px solid #cccccc;
@@ -64,10 +37,16 @@ TODO:
   margin: 1em 0;
 }
 
-mark {
-  background-color: LemonChiffon;
-  color: black;
+.note {
+  padding: 1em 1em 1em 1em;
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  border-radius: .25rem;
+  border-left: 0.3rem solid #007bff; /* Color for 'note' type */
+  background-color: #f8f9fa;
 }
+
+/* make tables & captions prettier */
 
 table, td, th {
   border: none;
@@ -78,10 +57,38 @@ table, td, th {
   margin-top: 1em;
   margin-bottom: 1em;
   max-width: 80%;
+  width: auto !important;    /* overrides Bootstrap's width: 100% */
   white-space: nowrap;
 }
 
+caption, .caption {
+  font-weight: bold;
+}
+
 ```
+
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  cache     = FALSE,
+  fig.align = "center",
+  fig.topcaption = TRUE
+)
+
+options(scipen = 999)
+options(digits = 4)
+options(knitr.kable.NA = "")     
+
+```
+
+::: note
+This page is built in R Markdown. Most code chunks are hidden by default, but you can click 'show' to see the code that loads the libraries and generates the data, figures, and tables. The code is also available in my [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
+:::
 
 ```{r libs}
 
@@ -283,15 +290,18 @@ You have several options, roughly in order of how often you'll reach for them:
 
 # Firth's penalized logistic regression via brglm2
 # the type = "AS_mean" option gives the "mean bias reduction" version
-firth.sep <- brglm2::brglm_fit(y ~ x,
-                            family = binomial,
-                            data   = sep.df,
-                            type   = "AS_mean")
+firth.sep <- glm(y ~ x, 
+                 family = binomial, 
+                 data = sep.df, 
+                 method = brglm2::brglm_fit, 
+                 type = "AS_mean")
 
-firth.qs  <- brglm2::brglm_fit(y ~ x.cat + x.cont,
-                            family = binomial,
-                            data   = qs.df,
-                            type   = "AS_mean")
+firth.qs <- glm(y ~ x.cat + x.cont, 
+                family = binomial, 
+                data = qs.df, 
+                method = brglm2::brglm_fit, 
+                type = "AS_mean")
+
 
 # compare: MLE (separated) vs. Firth (finite, interpretable)
 cat("MLE coefficient for x (sep.mod): ",

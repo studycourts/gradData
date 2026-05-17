@@ -21,6 +21,10 @@ knit: (function(input, ...) {
   })
 ---
 
+<!-- Add status notes here -->
+
+<p><a href="index.html">← Back to Index</a></p>
+
 ```{css, echo=FALSE}
 
 /* define the divs */
@@ -104,9 +108,7 @@ This page works through what residuals mean in the GLM context, why the most nat
 
 ------------------------------------------------------------------------
 
-> Click 'show' to see list of libraries.
-
-```{r libs, class.source = "fold-hide"}
+```{r libs}
 
 P <- c(
   "knitr",          # rendering
@@ -133,9 +135,7 @@ rm(P, pkg)  # clean up the mess
 
 ```
 
-> Click 'show' to see code for data simulations.
-
-```{r sims, class.source = "fold-hide"}
+```{r sims}
 
 set.seed(1975)   # for reproducibility
 
