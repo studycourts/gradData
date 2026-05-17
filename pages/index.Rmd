@@ -1,6 +1,6 @@
 ---
-title: "Regression Diagnostics: Supplementary Materials"
-subtitle: "UNLV Political Science — Graduate Methods Series"
+title: "Gill's Methods Cafe"
+subtitle: "Supplemental Resources for Political Science Graduate Methods"
 author: "Rebecca Gill"
 date: "`r Sys.Date()`"
 output:
@@ -109,7 +109,11 @@ These pages started as explanations I kept writing into homework assignments for
 
 The pages are organized around two modeling frameworks: ordinary least squares (OLS) regression and generalized linear models (GLMs). Each page covers a specific diagnostic topic in enough depth to make you a confident, careful user of these models. You'll notice a recurring voice throughout — a curious, sharp new graduate student asking questions you're probably thinking. That's you! These pages don't assume that you're a mathematician or a coding whiz. The goal isn't to turn you into a statistician. This is just here to give you the intuition and the practical tools to do this work well and to understand what you're doing when you do it.
 
-This resource is a work in progress, so please be patient. If there's specific content you'd like to see here, consider dropping me a line at and will grow over the coming months. Eventually the plan is to organize it into a proper e-book structure, but for now, think of it as a set of reference pages you can jump into as needed.
+This resource is a work in progress, so please be patient. If there's specific content you'd like to see here (or if you find a mistake!), please let me know here:
+
+<a href="https://github.com/studycourts/gradData/issues/new/choose" 
+   target="_blank" 
+   style="display: inline-block; padding: 12px 24px; background-color: #2da44e; color: white; text-decoration: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 600; border-radius: 6px; box-shadow: 0 1px 0 rgba(27, 31, 36, 0.1);"> Suggestion Box </a>
 
 ::: note
 **Note:** All pages are built in R Markdown, and most code chunks are hidden by default. Click "Code" at the top of any page and select "Show All Code" to see everything, or click the "Show" button above individual outputs to see the code for that specific result. The full source is also available in the [studycourts/gradData GitHub repository](https://github.com/studycourts/gradData/tree/main/pages).
