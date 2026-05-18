@@ -1,5 +1,5 @@
 ---
-title: "Overdispersion and Excess Zeros in Count Models"
+title: "Overdispersion in Count Models"
 author: "Rebecca Gill"
 date: "`r Sys.Date()`"
 header-includes:
@@ -7,7 +7,10 @@ header-includes:
 output:
   bookdown::html_document2:
     number_sections: FALSE
-    toc: false
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document

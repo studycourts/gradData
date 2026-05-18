@@ -7,7 +7,8 @@ header-includes:
 output:
   bookdown::html_document2:
     number_sections: FALSE
-    toc: false
+    toc: true
+    toc_float: true
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document

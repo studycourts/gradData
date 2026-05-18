@@ -7,7 +7,10 @@ header-includes:
 output:
   bookdown::html_document2:
     number_sections: FALSE
-    toc: false
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
     code_folding: hide
     self_contained: true
     base_format: rmarkdown::html_document
@@ -58,7 +61,7 @@ table, td, th {
   margin-bottom: 1em;
   max-width: 80%;
   width: auto !important;    /* overrides Bootstrap's width: 100% */
-  white-space: nowrap;
+  white-space: normal;
 }
 
 caption, .caption {
@@ -633,7 +636,7 @@ What to do instead:
 
 ## Summary
 
-```{r summary-table, results='asis'}
+```{r summary-table, include = FALSE}
 
 summ.tbl <- data.frame(
   Problem = c(
@@ -648,7 +651,7 @@ summ.tbl <- data.frame(
   How_to_detect = c(
     "Crosstab; `detect_separation()`; huge coefficients + huge SEs",
     "Empty cells in crosstab; `detect_separation()`; large coefficients",
-    "Large $|\\hat{\\beta}|$ paired with surprisingly small $z$; LRT >> Wald",
+"Large $\\vert\\hat{\\beta}\\vert$ paired with surprisingly small $z$; LRT >> Wald",
     "`car::vif()` or `performance::check_collinearity()`; VIF > 5",
     "N/A — don't do it",
     "`performance::check_convergence()`; optimizer warning in console",
@@ -664,14 +667,19 @@ summ.tbl <- data.frame(
     "Report ICC; compare with/without RE; consider whether groups are sufficient"
   )
 )
+```
+
+```{r sumtab}
 
 kable(summ.tbl,
+      format = "html",
       col.names = c("Problem", "How to detect it", "What to do"),
       caption   = "Quick reference: pre-estimation and estimation problems in GLMs and GLMMs",
       escape    = FALSE) %>%
   kable_styling(bootstrap_options = c("striped", "hover"),
                 full_width        = FALSE) %>%
-  column_spec(1, bold = TRUE)
+  column_spec(1, bold = TRUE) %>%
+  column_spec(c(2, 3), width = "15em")
 
 ```
 
