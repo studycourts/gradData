@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PSC 703 &middot; Interpretation Gallery: What Bad Looks Like</title>
+<style>
+  :root {
+    --navy: #1b3a5c;
+    --blue: #2c7fb8;
+    --orange: #d94801;
+    --paper: #ffffff;
+    --ink: #22303c;
+    --muted: #6b7c8c;
+    --qbg: #f4faff;
+    --hbg: #ffffe0;
+    --line: #ccd6df;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink); background: #eef2f5; line-height: 1.55;
+  }
+  header {
+    background: var(--navy); color: #fff; padding: 2.2rem 1.5rem 1.8rem;
+  }
+  header .inner { max-width: 1000px; margin: 0 auto; }
+  header h1 { margin: 0 0 .3rem; font-size: 1.85rem; font-weight: 650; letter-spacing: -.01em; }
+  header .sub { font-size: 1rem; opacity: .82; margin: 0; }
+  header .course { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em; opacity: .65; margin: 0 0 .6rem; }
+  main { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1.5rem 4rem; }
+  .intro {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1.2rem 1.4rem; margin: 1.5rem 0 2rem; font-size: .95rem;
+  }
+  .intro p { margin: 0 0 .7rem; }
+  .intro p:last-child { margin-bottom: 0; }
+  .toc {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+    gap: .5rem; margin: 1rem 0 2.2rem;
+  }
+  .toc a {
+    display: block; background: var(--paper); border: 1px solid var(--line);
+    border-left: 3px solid var(--blue); border-radius: 4px;
+    padding: .5rem .7rem; text-decoration: none; color: var(--ink); font-size: .82rem;
+  }
+  .toc a:hover { background: var(--qbg); border-left-color: var(--orange); }
+  .toc a .n { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: .4rem; }
+  figure.panel {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1.4rem; margin: 0 0 1.8rem; scroll-margin-top: 1rem;
+  }
+  figure.panel h2 {
+    margin: 0 0 .2rem; font-size: 1.18rem; color: var(--navy); font-weight: 650;
+  }
+  figure.panel .num {
+    display: inline-block; background: var(--navy); color: #fff;
+    border-radius: 3px; padding: .1rem .45rem; font-size: .72rem;
+    font-weight: 600; margin-right: .5rem; vertical-align: 2px;
+  }
+  figure.panel .where {
+    font-size: .76rem; color: var(--muted); margin: 0 0 1rem;
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  figure.panel img {
+    width: 100%; height: auto; display: block; margin: 0 0 1rem;
+    border: 1px solid #e6ecf1; border-radius: 4px;
+  }
+  .box { border: 1px solid var(--line); border-radius: 5px; padding: .75rem .95rem; margin: .7rem 0; font-size: .89rem; }
+  .q { background: var(--qbg); }
+  .h { background: var(--hbg); }
+  .box .lab {
+    display: block; font-size: .7rem; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--navy); margin-bottom: .3rem;
+  }
+  .box p { margin: 0 0 .5rem; }
+  .box p:last-child { margin: 0; }
+  code {
+    background: #f2f4f7; padding: .1em .35em; border-radius: 3px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .87em; color: #7d3c98;
+  }
+  .verdict { display: flex; gap: .8rem; flex-wrap: wrap; margin: .8rem 0 0; }
+  .verdict div {
+    flex: 1 1 250px; border-radius: 5px; padding: .6rem .8rem; font-size: .85rem;
+    border: 1px solid var(--line);
+  }
+  .verdict .good { background: #eef7f2; border-left: 3px solid #2e8b57; }
+  .verdict .bad  { background: #fdf1ea; border-left: 3px solid var(--orange); }
+  .verdict strong { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; margin-bottom: .2rem; }
+  .verdict .good strong { color: #2e8b57; }
+  .verdict .bad strong  { color: var(--orange); }
+  footer {
+    max-width: 1000px; margin: 0 auto; padding: 1.5rem; font-size: .82rem; color: var(--muted);
+    border-top: 1px solid var(--line);
+  }
+  h2.section {
+    font-size: .8rem; text-transform: uppercase; letter-spacing: .14em;
+    color: var(--muted); margin: 2.4rem 0 1rem; font-weight: 700;
+  }
+  h2.section:first-of-type { margin-top: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="inner">
+    <p class="course">PSC 703 &middot; Advanced Quantitative Methods II</p>
+    <h1>Interpretation Gallery: What Bad Looks Like</h1>
+    <p class="sub">Twelve residual plots, each labeled with the specific pathology it signals.</p>
+  </div>
+</header>
+
+<main>
+
+<div class="intro">
+  <p>The hardest part of diagnostics isn't running the tests. It's knowing whether the picture in front of you is a problem. This gallery gives you the visual vocabulary: each panel pairs a <em>correctly specified</em> model with a <em>broken</em> one, or shows a diagnostic that is actively misleading if you read it the way you'd read an OLS plot.</p>
+  <p>Every figure here is generated from simulated data where the truth is known, so when a panel is labeled "correct model," the model really is correct. That matters — several of these panels exist specifically to show you that a diagnostic can scream at a model that has nothing wrong with it.</p>
+  <p><strong>How to use this.</strong> Before you interpret a plot from your own model, find the panel it most resembles here and read the verdict.</p>
+</div>
+
+<div class="toc">
+  <a href="#f1"><span class="n">01</span>The binary residual lattice</a>
+  <a href="#f2"><span class="n">02</span>Quantile residuals fix it</a>
+  <a href="#f12"><span class="n">03</span>Three residuals, one model</a>
+  <a href="#f7"><span class="n">04</span>Uniformity histogram shapes</a>
+  <a href="#f3"><span class="n">05</span>Missing nonlinear term</a>
+  <a href="#f4"><span class="n">06</span>Overdispersion</a>
+  <a href="#f5"><span class="n">07</span>The variance/mean trap</a>
+  <a href="#f6"><span class="n">08</span>Excess zeros (rootogram)</a>
+  <a href="#f8"><span class="n">09</span>Influential observation</a>
+  <a href="#f9"><span class="n">10</span>Outlier vs. nonlinearity</a>
+  <a href="#f10"><span class="n">11</span>Proportional odds violation</a>
+  <a href="#f11"><span class="n">12</span>Two levels of residual</a>
+</div>
+
+<h2 class="section">Why the residual had to change</h2>
+
+<figure class="panel" id="f1">
+  <h2><span class="num">01</span>The binary residual lattice</h2>
+  <p class="where">Break 3 &middot; discreteness &middot; HW2, HW9</p>
+  <img src="figs/fig01_binary_lattice.png" alt="Three QQ plots of response, deviance, and Pearson residuals from a correctly specified logit, all deviating badly from the reference line">
+  <div class="box h">
+    <span class="lab">The point</span>
+    <p>This model is <strong>correctly specified</strong>. The data were simulated from exactly the logit that was fitted. Every one of these plots says the model is broken, and every one of them is wrong.</p>
+  </div>
+  <div class="box q">
+    <span class="lab">Why</span>
+    <p>With <code>y &isin; {0,1}</code>, the response residual takes only two values for any fitted probability: <code>1&minus;p&#770;</code> or <code>&minus;p&#770;</code>. That's a lattice, not a distribution. Deviance and Pearson residuals just rescale the same two branches — the S-curve in the middle panel and the heavy tails on the right are structural artifacts of discreteness, not evidence of misfit.</p>
+  </div>
+  <div class="verdict">
+    <div class="bad"><strong>Do not</strong>Use QQ plots of response, deviance, or Pearson residuals as your primary diagnostic for any binary or count model. You will reject correct models.</div>
+    <div class="good"><strong>Still useful for</strong>Pearson and deviance residuals remain fine for flagging individual outliers and computing the Pearson &chi;&sup2; statistic. It's the <em>distributional</em> reading that fails.</div>
+  </div>
+</figure>
+
+<figure class="panel" id="f2">
+  <h2><span class="num">02</span>Randomized quantile residuals fix it</h2>
+  <p class="where">Break 3 &middot; the probability integral transform</p>
+  <img src="figs/fig02_rqr_fixes_binary.png" alt="QQ plot and uniform histogram of randomized quantile residuals from the same correct logit, both well behaved">
+  <div class="box h">
+    <span class="lab">The point</span>
+    <p>Same data. Same model. New residual. The QQ plot now tracks the line and the uniform histogram is flat — which is what a correct model is supposed to look like.</p>
+  </div>
+  <div class="box q">
+    <span class="lab">Why it works</span>
+    <p>The probability integral transform: if <code>F</code> is the CDF of <code>Y</code>, then <code>F(Y) ~ Uniform(0,1)</code> no matter what <code>F</code> is, and <code>&Phi;&#8315;&sup1;(U) ~ N(0,1)</code>. For discrete outcomes the CDF is a step function, so we randomize <em>within the jump</em>: draw <code>u ~ Uniform(F(y&minus;1), F(y))</code>, then take <code>&Phi;&#8315;&sup1;(u)</code>.</p>
+    <p>Under a correct model these are <em>exactly</em> standard normal — not asymptotically, exactly. Common scale, unit variance, and known reference distribution, all restored in one construction.</p>
+  </div>
+  <div class="verdict">
+    <div class="good"><strong>Analytical</strong><code>statmod::qresid()</code> — deterministic given a seed, needs a closed-form CDF. Fine for any single-level GLM.</div>
+    <div class="good"><strong>Simulation-based</strong><code>DHARMa::simulateResiduals()</code> — needs only the ability to simulate. Required for GLMMs, ZINB, hurdle, <code>brms</code>.</div>
+  </div>
+</figure>
+
+<figure class="panel" id="f12">
+  <h2><span class="num">03</span>Three residuals, one correct model</h2>
+  <p class="where">Breaks 1&ndash;3 &middot; HW1, HW6</p>
+  <img src="figs/fig12_ols_vs_poisson_fan.png" alt="Three panels: OLS residuals on count data showing a fan, Poisson deviance residuals, and Poisson quantile residuals against the linear predictor">
+  <div class="box q">
+    <span class="lab">Reading left to right</span>
+    <p><strong>Left.</strong> OLS fitted to Poisson counts. The fan is <em>genuine</em> misfit — the variance really does grow with the mean and OLS assumes it doesn't.</p>
+    <p><strong>Middle.</strong> The correctly specified Poisson GLM, deviance residuals. Flatter, because deviance residuals partly absorb the mean&ndash;variance relationship. But that wedge shape at low fitted values is <em>structural</em> — small counts can't produce large negative residuals. Not misfit.</p>
+    <p><strong>Right.</strong> The same correct Poisson model, quantile residuals, plotted against the linear predictor <code>&eta;&#770;</code>. Featureless cloud. This is the only one of the three you can read the way you'd read an OLS residual plot.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">Note the x-axis</span>
+    <p>The right panel plots against <code>&eta;&#770; = predict(mod)</code>, not <code>&mu;&#770; = predict(mod, type="response")</code>. Linearity in a GLM is a claim about the <strong>link scale</strong>. Plot on the scale where the assumption lives.</p>
+  </div>
+</figure>
+
+<figure class="panel" id="f7">
+  <h2><span class="num">04</span>Uniformity histogram: four shapes to memorize</h2>
+  <p class="where">Break 3 &middot; reading DHARMa output</p>
+  <img src="figs/fig07_uniform_histogram.png" alt="Four histograms of DHARMa residuals: flat, peaked in the middle, U-shaped, and sloped">
+  <div class="box q">
+    <span class="lab">What each shape means</span>
+    <p><strong>Flat.</strong> Observations are landing across the full range of what the model predicted. This is the target.</p>
+    <p><strong>Peaked in the middle.</strong> Too few extreme observations. The model's predictive distribution is <em>wider</em> than the data — an overdispersed model, or one with too much noise built in.</p>
+    <p><strong>U-shaped.</strong> Too many observations in both tails. The model's predictive distribution is too narrow. In a count model this is the classic overdispersed-data signature: switch to negative binomial.</p>
+    <p><strong>Sloped.</strong> Systematically more observations high (or low) than predicted. The mean structure is biased — usually a missing predictor or a wrong link.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">Remember</span>
+    <p>A DHARMa residual of 0.5 means the observation fell dead center of the simulated distribution. 0.99 means it was larger than 99% of what the model simulated. <strong>Flat means the observations land everywhere they should.</strong></p>
+  </div>
+</figure>
+
+<h2 class="section">Job 1 &mdash; is the distribution right?</h2>
+
+<figure class="panel" id="f4">
+  <h2><span class="num">06</span>Overdispersion</h2>
+  <p class="where">Break 2 &middot; the variance function &middot; HW6, HW7</p>
+  <img src="figs/fig04_overdispersion.png" alt="Two QQ plots: Poisson fitted to negative binomial data showing heavy tails, and the negative binomial fit showing a clean line">
+  <div class="box q">
+    <span class="lab">The signature</span>
+    <p>An S-curve with heavy tails on both ends: the observations are more extreme, in both directions, than the fitted Poisson can generate. Pearson dispersion is 3.20 when it should be 1. On the uniformity histogram this shows up as the U-shape from panel 04.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">Why it matters</span>
+    <p>Overdispersion doesn't bias the coefficients much. It makes the <strong>standard errors too small</strong> by roughly &radic;&phi;&#770; — so with &phi;&#770; = 3.20, every SE in the model is off by a factor of about 1.8, in the anticonservative direction. Every p-value is wrong.</p>
+  </div>
+  <div class="verdict">
+    <div class="good"><strong>Detect</strong><code>performance::check_overdispersion()</code> for a reportable statistic; <code>DHARMa::testDispersion()</code> for the visual; the quasipoisson &phi;&#770; for a sense of scale.</div>
+    <div class="good"><strong>Fix</strong>Negative binomial if you want a likelihood (AIC, LRT). QuasiPoisson if you only want corrected SEs and don't need model comparison.</div>
+  </div>
+</figure>
+
+<figure class="panel" id="f5">
+  <h2><span class="num">07</span>The variance-to-mean trap</h2>
+  <p class="where">Break 2 &middot; a diagnostic that is simply wrong</p>
+  <img src="figs/fig05_variance_mean_trap.png" alt="Bar chart comparing a marginal variance-to-mean ratio of 2.60 against a conditional Pearson dispersion of 0.94, plus a histogram showing wide variation in fitted means">
+  <div class="box h">
+    <span class="lab">Read this one carefully</span>
+    <p>These data are <strong>exactly Poisson given X</strong>. I simulated them that way. The raw variance-to-mean ratio of the outcome is <strong>2.60</strong> — which looks like severe overdispersion and isn't. The conditional (Pearson) dispersion is <strong>0.94</strong>, which is correct.</p>
+  </div>
+  <div class="box q">
+    <span class="lab">Why the gap</span>
+    <p>By the law of total variance, for a Poisson GLM: <code>Var(Y) = E[&mu;] + Var(&mu;)</code>. That second term is variation in the fitted mean <em>across observations</em> — it's your covariates doing their job. The right-hand histogram shows how much <code>&mu;&#770;&#7522;</code> ranges here. Comparing marginal variance to marginal mean folds covariate-driven signal into what you're calling "dispersion."</p>
+    <p>The stronger your predictors, the more misleading the raw ratio gets. Taken seriously, it would also mean a ratio near 1 with strong covariates is evidence of <em>under</em>dispersion.</p>
+  </div>
+  <div class="verdict">
+    <div class="bad"><strong>Never</strong>Compare <code>var(y)/mean(y)</code> to 1 and call it an overdispersion test.</div>
+    <div class="good"><strong>Always</strong>Condition on the model: <code>check_overdispersion()</code>, the quasipoisson &phi;&#770;, or <code>testDispersion()</code>.</div>
+  </div>
+</figure>
+
+<figure class="panel" id="f6">
+  <h2><span class="num">08</span>Excess zeros &mdash; the hanging rootogram</h2>
+  <p class="where">Break 2 &middot; HW7</p>
+  <img src="figs/fig06_zero_inflation_rootogram.png" alt="Hanging rootogram comparing Poisson and zero-inflated Poisson fits, with a dramatic deficit at zero for the Poisson">
+  <div class="box q">
+    <span class="lab">How to read it</span>
+    <p>Each bar is &radic;(observed) &minus; &radic;(predicted) for one count value. A bar hanging <strong>below</strong> the line means the model <em>underpredicts</em> that count; above means it overpredicts. A well-fitting model gives bars that hover near zero across the whole range.</p>
+    <p>The Poisson (orange) misses badly at <code>k=0</code> and compensates by overpredicting <code>k=1</code> through <code>k=4</code>. The ZIP (blue) tracks the observed distribution throughout. That specific pattern — a deficit at zero paired with a surplus at the low positive counts — is the signature of excess zeros.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">Distinct from overdispersion</span>
+    <p>You can have excess zeros without general overdispersion, and overdispersion without excess zeros. Test for both, separately: <code>check_zeroinflation()</code> and <code>testZeroInflation()</code>.</p>
+    <p><strong>ZIP vs. hurdle is theoretical.</strong> Zero-inflation says some units are structurally "always-zero" types mixed in with units that just happened to draw a zero. Hurdle says all zeros come from one gate. Ask which story is true in your application; Vuong is evidence, not a decision rule.</p>
+  </div>
+</figure>
+
+<h2 class="section">Job 2 &amp; 3 &mdash; the linear predictor and individual cases</h2>
+
+<figure class="panel" id="f3">
+  <h2><span class="num">05</span>A missing nonlinear term</h2>
+  <p class="where">Break 1 &middot; linearity on the link scale &middot; HW4</p>
+  <img src="figs/fig03_poisson_nonlinearity.png" alt="Quantile residuals plotted against x1 for a misspecified and a correctly specified Poisson model; the misspecified panel shows a clear inverted-U">
+  <div class="box q">
+    <span class="lab">The signature</span>
+    <p>A smooth, systematic arc in the residuals against one predictor. An inverted U (or U) centered near zero is the classic missing-quadratic pattern. The correctly specified model on the right shows the smoother tracking flat across the whole range of <code>x&#8321;</code>.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">Locate before you fix</span>
+    <p>The overall QQ plot will tell you <em>that</em> something is wrong. It won't tell you <em>where</em>. Plot residuals against each predictor in turn — the panel that curves is the variable that needs work. <code>DHARMa::plotResiduals(sim, form = dat$x)</code>, or <code>testQuantiles()</code> for a formal version.</p>
+  </div>
+  <div class="verdict">
+    <div class="good"><strong>Diagnose with</strong>A GAM: <code>mgcv::gam(y ~ s(x1) + s(x2), family = poisson)</code>. If the smooth looks like a line, your linear specification is fine. If it curves, it tells you what shape to reach for.</div>
+    <div class="good"><strong>Fix with</strong><code>I(x^2)</code>, <code>splines::ns(x, df=3)</code>, or <code>log(x)</code>. Confirm with an LRT. Fit the <em>parametric</em> model for inference — the GAM was the diagnostic.</div>
+  </div>
+</figure>
+
+<figure class="panel" id="f8">
+  <h2><span class="num">09</span>An influential observation</h2>
+  <p class="where">Break 3 &middot; Job 3 &middot; HW2, HW4, HW7</p>
+  <img src="figs/fig08_influence.png" alt="DFBETA index plot with one point far outside the threshold, and a bar chart comparing coefficients with and without that observation">
+  <div class="box q">
+    <span class="lab">Three different things</span>
+    <p><strong>Outlier in Y</strong> — far from prediction. <strong>Leverage</strong> — extreme in X-space. <strong>Influence</strong> — removing it changes the answer. Only the third one matters, and it's typically high leverage <em>plus</em> a surprising outcome. Observation 1 here has <code>x&#8321; = 4.5</code> and an outcome of 0 when the model expects 1.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">The sequence</span>
+    <p>Quantile-residual QQ plot to find candidates &rarr; <code>cooks.distance()</code> to rank overall influence (the 4/n line is a convention; what matters is separation from the pack) &rarr; <code>dfbetas()</code> to see <em>which coefficient</em> and in <em>which direction</em> &rarr; <strong>refit without it and compare</strong>. That last step is the only dispositive one.</p>
+  </div>
+  <div class="verdict">
+    <div class="bad"><strong>Don't</strong>Delete it because it's inconvenient. Delete only for a documented data error, and say so.</div>
+    <div class="good"><strong>Do</strong>Report the analysis with and without. An influential point is a question about whether your model describes that part of the covariate space — answer it.</div>
+  </div>
+</figure>
+
+<figure class="panel" id="f9">
+  <h2><span class="num">10</span>Outlier masquerading as nonlinearity</h2>
+  <p class="where">Break 3 &middot; why the order matters &middot; HW3 Tangent 1, HW4</p>
+  <img src="figs/fig09_outlier_vs_nonlinearity.png" alt="Two residual-vs-predictor plots: with two inflated counts the smoother bends at the right tail; with them removed it is flat">
+  <div class="box h">
+    <span class="lab">The trap</span>
+    <p>Left panel: a clear upward bend in the smoother at the right tail. Every instinct says "add a quadratic term." Right panel: the same model with <strong>two</strong> inflated counts removed. The curvature is gone. There was never any nonlinearity.</p>
+  </div>
+  <div class="box q">
+    <span class="lab">It runs both ways</span>
+    <p>A genuine outlier at an extreme <code>x</code> pulls <code>&beta;&#770;</code>, which bends the residual curve and looks like nonlinearity. Genuine nonlinearity produces a cluster of large same-signed residuals at the extremes of <code>x</code>, which looks like a pile of outliers.</p>
+    <p><strong>The tell:</strong> many flagged points, all the same direction, at one end of a predictor's range &rarr; suspect nonlinearity. A few points in different directions &rarr; suspect genuinely extreme cases.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">Ordering rule</span>
+    <p><strong>Outliers first, then nonlinearity, then loop back.</strong> The local explanation is cheap to rule out and can dissolve the global one. The reverse isn't true — adding <code>x&sup2;</code> to accommodate one leverage point is how you end up with a term you can't defend. Going around twice isn't p-hacking; it's what understanding your data looks like.</p>
+  </div>
+</figure>
+
+<h2 class="section">Structural assumptions and clustering</h2>
+
+<figure class="panel" id="f10">
+  <h2><span class="num">11</span>A proportional odds violation</h2>
+  <p class="where">Break 4 &middot; HW3, HW4, HW10</p>
+  <img src="figs/fig10_po_assumption.png" alt="Two panels of threshold-specific coefficients: in the left panel both predictors cluster around their pooled estimates; in the right panel x1 fans out">
+  <div class="box h">
+    <span class="lab">The most important thing on this page</span>
+    <p><strong>No residual will ever catch this.</strong> Your DHARMa plots can be immaculate while the proportional odds assumption is badly violated. PO is a structural claim about the link, not a distributional claim about the errors, so it needs its own test. Same for IIA in multinomial models.</p>
+  </div>
+  <div class="box q">
+    <span class="lab">How to read it</span>
+    <p>Fit the unconstrained model (a GOL, or separate binary logits at each cumulative threshold) and plot the threshold-specific coefficients against the PO estimate (dashed line). <strong>Clustering around the line = the assumption holds. Fanning out = violated.</strong></p>
+    <p>Left: both predictors sit on their reference lines at both thresholds. Right: <code>x&#8321;</code> is roughly 0.70 at the first threshold and 0.17 at the second, with non-overlapping intervals. The single PO coefficient is a weighted average that hides where the action is. <code>x&#8322;</code> is fine in both panels.</p>
+  </div>
+  <div class="verdict">
+    <div class="good"><strong>Test with</strong><code>ordinal::nominal_test()</code> (LR-based) and <code>brant::brant()</code> (Wald-based). Look at the per-predictor rows, not just the omnibus. <strong>When they disagree, believe the LR test</strong> — Brant inherits the Hauck-Donner problem.</div>
+    <div class="good"><strong>Fix with</strong>Some predictors violate &rarr; PPO. Most or all &rarr; GOL. Ordering itself suspect &rarr; stereotype logit, check whether the &phi;&#11388; are monotone in (0,1). Ordering genuinely wrong &rarr; multinomial.</div>
+  </div>
+</figure>
+
+<figure class="panel" id="f11">
+  <h2><span class="num">12</span>Two levels of residual</h2>
+  <p class="where">Break 5 &middot; HW8, HW9, HW10</p>
+  <img src="figs/fig11_glmm_two_levels.png" alt="QQ plot of BLUPs with one group far out in the tail, and a bar chart of mean level-1 residual by group with one group standing apart">
+  <div class="box q">
+    <span class="lab">Two random objects, two residuals</span>
+    <p><strong>Level 1</strong> — observation-level residuals. Is the fixed-effect specification right? Use DHARMa; for a GLMM the simulation marginalizes over the random effects automatically.</p>
+    <p><strong>Level 2</strong> — the BLUPs <code>u&#770;&#11388;</code>. Is the random-effects structure right? Do any whole groups behave in ways the model doesn't anticipate?</p>
+    <p>One group here has a genuinely unusual intercept. At level 1 nothing looks wrong — <em>the random effect absorbed it</em>. It only surfaces when you look at the groups as groups. Almost every diagnostic function defaults to level 1, and level 2 is the one people skip.</p>
+  </div>
+  <div class="box h">
+    <span class="lab">Reading the BLUP QQ plot</span>
+    <p>Partial pooling shrinks BLUPs toward zero, which makes their empirical distribution look <em>more</em> normal than the true random effects are. The center will look fine regardless. <strong>Judge the tails</strong> — those are the groups with the most data and the least shrinkage.</p>
+  </div>
+  <div class="verdict">
+    <div class="good"><strong>Level-2 toolkit</strong>BLUP QQ plot &middot; caterpillar plot (<code>ranef(mod, condVar=TRUE)</code>) &middot; group-aggregated DHARMa residuals (should scatter near 0.5) &middot; mean absolute residual by group.</div>
+    <div class="good"><strong>Also GLMM-only</strong>ICC (is a mixed model warranted?) &middot; <code>check_singularity()</code> &middot; <code>check_convergence()</code> &middot; the Mundlak correction for heterogeneity bias.</div>
+  </div>
+</figure>
+
+</main>
+
+<footer>
+  <p>PSC 703 &middot; Wrapping Up Diagnostics. Figures generated from simulated data with known ground truth. Companion to the lecture deck and the one-page decision tree.</p>
+  <p>Further reading: <a href="https://studycourts.github.io/gradData/">Gill's Methods Cafe</a> &mdash; GLM Residuals, Outliers and Nonlinearity, Overdispersion, Model-Specific Assumptions, Separability and Convergence, Diagnosing Mixed Models.</p>
+</footer>
+
+</body>
+</html>

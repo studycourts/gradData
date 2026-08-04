@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PSC 703 &middot; GLM Diagnostics Decision Tree</title>
+<style>
+  @page { size: letter portrait; margin: 0.4in; }
+  :root {
+    --navy: #1b3a5c; --blue: #2c7fb8; --orange: #d94801;
+    --line: #b8c4ce; --ink: #1c2833; --muted: #5c6b78;
+    --qbg: #f4faff; --hbg: #fffde7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: var(--ink); font-size: 7.6pt; line-height: 1.32; background: #e8ecef;
+  }
+  .sheet {
+    width: 8.5in; min-height: 11in; margin: 0 auto; background: #fff;
+    padding: 0.34in 0.4in; box-shadow: 0 2px 12px rgba(0,0,0,.15);
+  }
+  h1 { font-size: 14pt; margin: 0 0 1pt; color: var(--navy); letter-spacing: -.01em; }
+  .tag { font-size: 6.4pt; text-transform: uppercase; letter-spacing: .13em; color: var(--muted); margin: 0 0 1pt; }
+  .lede { font-size: 7.4pt; color: var(--muted); margin: 0 0 7pt; font-style: italic; }
+  hr { border: 0; border-top: 1.5pt solid var(--navy); margin: 0 0 7pt; }
+
+  h2 {
+    font-size: 7.6pt; text-transform: uppercase; letter-spacing: .1em;
+    color: #fff; background: var(--navy); margin: 8pt 0 4pt;
+    padding: 2.5pt 5pt; border-radius: 2pt;
+  }
+  h2 .step { opacity: .6; margin-right: 5pt; font-variant-numeric: tabular-nums; }
+
+  table { width: 100%; border-collapse: collapse; margin: 0 0 3pt; }
+  th {
+    background: #eaf1f7; color: var(--navy); text-align: left;
+    font-size: 6.5pt; text-transform: uppercase; letter-spacing: .05em;
+    padding: 2.5pt 4pt; border-bottom: 1pt solid var(--navy);
+  }
+  td { padding: 2.5pt 4pt; border-bottom: .5pt solid #dde4ea; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 6.7pt;
+    color: #6a2c8f; background: #f5f2f8; padding: .3pt 1.8pt; border-radius: 1.5pt;
+    white-space: nowrap;
+  }
+  .bad  { color: var(--orange); font-weight: 600; }
+  .good { color: #1e7a4d; font-weight: 600; }
+
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; }
+  .cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7pt; }
+
+  .card {
+    border: .8pt solid var(--line); border-radius: 3pt; padding: 4.5pt 6pt;
+    background: var(--qbg); break-inside: avoid;
+  }
+  .card.warn { background: var(--hbg); border-color: #d8cf7a; }
+  .card h3 {
+    font-size: 7pt; margin: 0 0 2.5pt; color: var(--navy);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .card.warn h3 { color: #8a6d0b; }
+  .card p { margin: 0 0 2.5pt; }
+  .card p:last-child { margin: 0; }
+  .card ul { margin: 0; padding-left: 10pt; }
+  .card li { margin-bottom: 1.5pt; }
+
+  .flow { display: flex; align-items: stretch; gap: 3pt; margin: 3pt 0 5pt; }
+  .flow .node {
+    flex: 1; border: .8pt solid var(--blue); border-radius: 3pt;
+    padding: 3.5pt 4pt; background: #fff; text-align: center; font-size: 6.8pt;
+  }
+  .flow .node b { display: block; color: var(--navy); font-size: 7pt; margin-bottom: 1pt; }
+  .flow .arrow { align-self: center; color: var(--blue); font-size: 11pt; font-weight: 700; }
+
+  .banner {
+    border-left: 3pt solid var(--orange); background: #fdf2ec;
+    padding: 4pt 7pt; margin: 5pt 0; font-size: 7.3pt; border-radius: 0 3pt 3pt 0;
+  }
+  .banner b { color: var(--orange); }
+
+  footer {
+    margin-top: 8pt; padding-top: 4pt; border-top: .8pt solid var(--line);
+    font-size: 6.3pt; color: var(--muted); display: flex; justify-content: space-between;
+  }
+  @media print {
+    body { background: #fff; font-size: 7.4pt; }
+    .sheet { box-shadow: none; margin: 0; width: auto; min-height: 0; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<p class="tag">PSC 703 &middot; Advanced Quantitative Methods II</p>
+<h1>GLM &amp; GLMM Diagnostics: The Decision Tree</h1>
+<p class="lede">My DV is ___ &rarr; these residuals &rarr; these tests &rarr; this is what bad looks like &rarr; this is the fix.</p>
+<hr>
+
+<h2><span class="step">0</span>Pre-flight &mdash; can this model even be estimated?</h2>
+<p style="margin:0 0 3pt"><em>Residuals from an unestimable model are meaningless. Clear this gate first.</em></p>
+<table>
+<tr><th style="width:20%">Problem</th><th style="width:31%">Detect</th><th style="width:23%">What bad looks like</th><th style="width:26%">Fix</th></tr>
+<tr><td><b>Separation</b></td><td>Crosstab every categorical predictor &times; Y; <code>method="detect_separation"</code></td><td>Empty cell; <span class="bad">|&beta;&#770;| &gt; 10 with a giant SE</span>; "did not converge"</td><td>Firth penalized likelihood (<code>brglm2</code>); weak Bayesian priors; collapse the category</td></tr>
+<tr><td><b>Hauck-Donner</b></td><td>Compare Wald <em>z</em> to <code>drop1(m, test="Chisq")</code></td><td>Large &beta;&#770; with a <span class="bad">surprisingly small z</span>; LRT &gg; Wald</td><td>Report the <b>LRT</b>, not the Wald test. Firth helps too.</td></tr>
+<tr><td><b>Collinearity</b></td><td><code>check_collinearity()</code>; for <code>clm</code>/<code>vglm</code>/<code>glmer</code> use an OLS proxy on the same X</td><td>VIF &gt; 5 investigate, &gt; 10 serious. Structural VIF from interactions is fine.</td><td>Drop on theory; center before interactions. <span class="bad">Never stepwise.</span></td></tr>
+<tr><td><b>Convergence</b> (GLMM)</td><td><code>check_convergence()</code></td><td><code>max|grad|</code> warning</td><td>Rescale &rarr; more iterations &rarr; new optimizer &rarr; <code>allFit()</code></td></tr>
+<tr><td><b>Singular fit</b> (GLMM)</td><td><code>check_singularity()</code>; <code>VarCorr()</code></td><td>Random-effect SD prints as exactly <code>0</code>; corr pinned at &plusmn;1</td><td>Report ICC; fit with/without the RE; need &ge;10&ndash;15 groups</td></tr>
+</table>
+
+<h2><span class="step">1</span>Pick the residual &mdash; by outcome type</h2>
+<table>
+<tr><th style="width:15%">DV</th><th style="width:29%">Residual to use</th><th style="width:28%">Why</th><th style="width:28%">Never use as primary</th></tr>
+<tr><td><b>Continuous</b><br>(Gaussian)</td><td>Ordinary residuals. <code>plot(mod)</code> is genuinely fine.</td><td>P1&ndash;P3 all intact &mdash; nothing broke.</td><td>&mdash;</td></tr>
+<tr><td><b>Binary</b></td><td><code>statmod::qresid()</code> or <code>DHARMa</code><br>+ <code>binned_residuals()</code></td><td>Response residual takes only 2 values per p&#770;. Deviance/Pearson just rescale the lattice.</td><td class="bad">QQ plots of response, deviance, or Pearson residuals</td></tr>
+<tr><td><b>Ordinal</b></td><td><code>DHARMa</code> (via <code>ordinal::clm</code>, <code>MASS::polr</code>)</td><td>Discrete outcome &rarr; same problem as binary.</td><td class="bad">Same. Plus: residuals say <em>nothing</em> about PO.</td></tr>
+<tr><td><b>Nominal</b></td><td>Hand-rolled RQR from posterior predictive draws (<code>brms</code> + <code>tidybayes</code>)</td><td>No package supplies these. You build the CDF by simulation.</td><td class="bad">Anything OLS-shaped. There is no continuous analogue.</td></tr>
+<tr><td><b>Count</b></td><td><code>statmod::qres.pois()</code>/<code>qres.nb()</code> or <code>DHARMa</code></td><td>Discreteness plus a mean-variance link.</td><td class="bad">QQ of deviance residuals; raw <code>var(y)/mean(y)</code></td></tr>
+<tr><td><b>Any + clustered</b></td><td><b>DHARMa required</b>, plus BLUPs at level 2</td><td>Marginal CDF has no closed form &rarr; analytic RQRs are impossible.</td><td class="bad">Level-1 residuals alone. You will miss outlier groups.</td></tr>
+</table>
+
+<div class="banner">
+<b>The one idea underneath all of this.</b> OLS residuals work because they have a common scale, constant variance, and a known reference distribution. Non-identity links, mean-variance coupling, and discreteness destroy those properties one at a time. Randomized quantile residuals &mdash; <code>u ~ Uniform(F(y&minus;1), F(y))</code>, then <code>&Phi;&#8315;&sup1;(u)</code> &mdash; restore all three at once. That is why every path above ends at the same place.
+</div>
+
+<h2><span class="step">2</span>Run the checks &mdash; in this order</h2>
+<div class="flow">
+  <div class="node"><b>1. Distribution</b>dispersion, zeros, family</div>
+  <div class="arrow">&rarr;</div>
+  <div class="node"><b>2. Residual</b>QQ + uniformity hist</div>
+  <div class="arrow">&rarr;</div>
+  <div class="node"><b>3. Influence</b>Cook's D, DFBETAS, refit</div>
+  <div class="arrow">&#8646;</div>
+  <div class="node"><b>4. Linearity</b>resid vs. each X, GAM</div>
+  <div class="arrow">&rarr;</div>
+  <div class="node"><b>5. Structure</b>PO, IIA, ordering</div>
+  <div class="arrow">&rarr;</div>
+  <div class="node"><b>6. Level 2</b>BLUPs, groups, ICC</div>
+</div>
+<div class="cols3">
+  <div class="card warn">
+    <h3>Why 1 before 3</h3>
+    <p>Overdispersion narrows DHARMa's simulation envelope, so ordinary points get flagged as outliers. HW6 flagged a pile of them &mdash; it was one variance-function problem in disguise. <b>Fix the family before you interrogate individuals.</b></p>
+  </div>
+  <div class="card warn">
+    <h3>Why 3 before 4</h3>
+    <p>An influential point pulls &beta;&#770;, which bends the residual curve and looks like nonlinearity. Ruling out the local explanation is cheap (drop two rows, refit). The reverse isn't &mdash; adding <code>x&sup2;</code> for one leverage point gives you a term you can't defend.</p>
+  </div>
+  <div class="card warn">
+    <h3>Why 3 &#8646; 4 loops</h3>
+    <p>Nonlinearity also produces same-signed residual clusters that look like outliers. <b>Tell:</b> many flags, one direction, one end of X's range &rarr; nonlinearity. Few flags, mixed directions &rarr; real extreme cases. Expect two passes. That isn't p-hacking.</p>
+  </div>
+</div>
+
+<h2><span class="step">3</span>Reading the picture &mdash; symptom to diagnosis</h2>
+<table>
+<tr><th style="width:32%">What you see</th><th style="width:33%">What it usually means</th><th style="width:35%">Confirm / fix</th></tr>
+<tr><td>Uniformity histogram is <b>flat</b></td><td class="good">Good fit</td><td>Move on to per-predictor plots</td></tr>
+<tr><td>Uniformity histogram is <b>U-shaped</b></td><td>Data more extreme than model &rarr; overdispersion / too-narrow predictive distribution</td><td><code>check_overdispersion()</code>; <code>testDispersion()</code> &rarr; NB or quasipoisson</td></tr>
+<tr><td>Uniformity histogram <b>peaks in the middle</b></td><td>Model's predictive distribution too wide &rarr; underdispersion</td><td><code>testDispersion()</code>; reconsider family</td></tr>
+<tr><td>Uniformity histogram is <b>sloped</b></td><td>Mean structure biased &rarr; missing predictor or wrong link</td><td>Plot residuals vs. omitted candidates; try another link</td></tr>
+<tr><td><b>Arc / U</b> in residuals vs. one predictor</td><td>Missing nonlinear term in <em>that</em> variable</td><td>GAM smooth &rarr; <code>I(x^2)</code>, <code>ns(x,3)</code>, <code>log(x)</code>; LRT to confirm</td></tr>
+<tr><td><b>Rootogram dips hard at k=0</b></td><td>Excess zeros (distinct from overdispersion)</td><td><code>check_zeroinflation()</code> &rarr; ZIP/ZINB (structural zeros real?) or hurdle</td></tr>
+<tr><td><b>Dozens of "outliers"</b> in a Poisson model</td><td>Almost always overdispersion, not outliers</td><td>Test dispersion <em>first</em>; refit as NB; re-check</td></tr>
+<tr><td><b>One point far past 2/&radic;n</b> on DFBETAS</td><td>Genuine influence on one coefficient</td><td>Refit without it and compare. Report both ways.</td></tr>
+<tr><td>GOL coefficients <b>fan out</b> across thresholds</td><td>Proportional odds violated for that predictor</td><td><code>nominal_test()</code> &rarr; PPO (some) or GOL (most)</td></tr>
+<tr><td><b>Tails</b> of the BLUP QQ plot depart</td><td>Outlier groups / RE distribution misspecified</td><td>Caterpillar plot; group-mean residuals. <em>Ignore the center</em> &mdash; shrinkage fakes normality there.</td></tr>
+<tr><td>Level 1 clean but <b>one group's mean residual</b> stands apart</td><td>An outlier group the random effect absorbed</td><td>Investigate substantively; check group size and ICC</td></tr>
+</table>
+
+<h2><span class="step">4</span>Assumptions no residual will ever test</h2>
+<div class="cols2">
+  <div class="card">
+    <h3>Proportional odds &mdash; ordinal models</h3>
+    <p>One &beta; shared across all J&minus;1 cumulative logits. Violated &rarr; &beta;&#770; is a weighted average hiding <em>where</em> in the outcome scale the effect lives.</p>
+    <p><b>See it:</b> plot GOL threshold-specific coefficients vs. the PO estimate. Cluster = holds; fan = violated.</p>
+    <p><b>Test:</b> <code>ordinal::nominal_test()</code> (LR) and <code>brant::brant()</code> (Wald). <b>When they disagree, believe the LR test</b> &mdash; Brant inherits Hauck-Donner.</p>
+    <p><b>Fix:</b> some &rarr; PPO &middot; most &rarr; GOL &middot; ordering suspect &rarr; SLM (are &phi;&#11388; monotone in 0&ndash;1?) &middot; ordering wrong &rarr; MNL.</p>
+  </div>
+  <div class="card">
+    <h3>IIA &mdash; multinomial logit</h3>
+    <p>Odds of j over k don't depend on any other alternative. Red bus / blue bus: near-perfect substitutes get treated as independent options.</p>
+    <p><b>Test cautiously:</b> Hausman-McFadden and Small-Hsiao both have low power, poor size, and HM can return a negative &chi;&sup2;. The restricted model drops a non-random subsample.</p>
+    <p><b>Treat IIA as theoretical.</b> Are your categories plausible substitutes? If yes, plan for nested / mixed / conditional logit regardless of the test.</p>
+    <p><b>Bonus:</b> SLM &phi;&#11388; also diagnose whether your "nominal" outcome secretly has an ordering.</p>
+  </div>
+</div>
+<div class="cols2" style="margin-top:5pt">
+  <div class="card">
+    <h3>Heterogeneity bias &mdash; mixed models</h3>
+    <p>A level-1 predictor correlated with the group random effect contaminates the within-group effect with between-group composition.</p>
+    <p><b>Mundlak:</b> add the group mean of X as a level-2 covariate alongside the group-centered X. If the group-mean coefficient is significant and differs from the within coefficient, the original model was conflating two processes.</p>
+  </div>
+  <div class="card">
+    <h3>Is a mixed model warranted at all?</h3>
+    <p>ICC = &tau;&#8320;&#8320;/(&tau;&#8320;&#8320;+&sigma;&sup2;). <b>For logit, &sigma;&sup2; is fixed at &pi;&sup2;/3 &asymp; 3.29</b>, not estimated. <code>performance::icc()</code> handles this.</p>
+    <p>&gt;.05 meaningful, &gt;.10 strong &mdash; but if clustering is theoretically real, include it anyway. An unneeded RE costs a little efficiency; ignoring real clustering biases every SE.</p>
+    <p><b>Random slopes:</b> theory first, then <code>anova(ri, rs, refit=FALSE)</code>. Don't test slopes on everything.</p>
+  </div>
+</div>
+
+<h2><span class="step">5</span>Five ways to get this wrong</h2>
+<table>
+<tr><th style="width:44%">Mistake</th><th style="width:56%">Instead</th></tr>
+<tr><td class="bad">QQ-plotting deviance/Pearson residuals for a binary or count model</td><td>They're non-normal even under a perfect model. Use quantile residuals. (Still fine for flagging individual outliers.)</td></tr>
+<tr><td class="bad">Comparing <code>var(y)/mean(y)</code> to 1 as a dispersion test</td><td>Var(Y) = E[&mu;] + Var(&mu;). Covariate-driven variation inflates the ratio. Condition on the model: <code>check_overdispersion()</code>.</td></tr>
+<tr><td class="bad">Leading with p-values from diagnostic tests</td><td>Plots are the primary evidence. <b>Large N:</b> tests reject on trivia &mdash; believe the plot. <b>Small N:</b> tests miss real problems &mdash; believe the plot.</td></tr>
+<tr><td class="bad">Treating <code>check_model()</code> as the endpoint</td><td>It's a first pass that tells you where to dig. Plot residuals against <em>your own</em> predictors and think about the shapes.</td></tr>
+<tr><td class="bad">Deleting an inconvenient outlier</td><td>Delete only for a documented data error, and say so. Otherwise report with and without.</td></tr>
+</table>
+
+<h2><span class="step">6</span>Reporting</h2>
+<div class="cols3">
+  <div class="card"><h3>Footnote or text</h3><p>Statistic, df, p-value, and what you did. <em>"An LR test indicates education violates the PO assumption (&chi;&sup2;&#8321; = 49.37, p &lt; .001), so I estimate a PPO model."</em></p></div>
+  <div class="card"><h3>Appendix</h3><p>Residual plots, the with/without-outlier comparison, the model comparison table, the diagnostics that didn't change anything.</p></div>
+  <div class="card"><h3>Main text</h3><p>Only what changes a reader's interpretation. If a diagnostic drove a modeling decision, the reader needs to know.</p></div>
+</div>
+
+<footer>
+  <span>PSC 703 &middot; Wrapping Up Diagnostics &middot; companion to the lecture deck and interpretation gallery</span>
+  <span>studycourts.github.io/gradData</span>
+</footer>
+
+</div>
+</body>
+</html>
